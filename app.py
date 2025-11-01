@@ -122,14 +122,15 @@ def send_setup_password_email(user):
     """Envía correo con enlace para configurar contraseña - Versión ASÍNCRONA MEJORADA"""
     try:
         if not user or not user.email:
-            print("No se pudo enviar el correo: usuario o email inválido")
+            print("❌ No se pudo enviar el correo: usuario o email inválido")
             return False
 
-        print(f"Iniciando envío asíncrono a: {user.email}")
+        print(f"📧 Preparando envío a: {user.email}")
 
-        # Crear el mensaje en el hilo principal
         token = generate_token(user.id)
         setup_url = url_for('set_first_password_token', token=token, _external=True)
+
+        print(f"🔗 URL generada: {setup_url}")
 
         html_body = f'''
         <!DOCTYPE html>
@@ -300,26 +301,42 @@ def send_setup_password_email(user):
             body=text_body
         )
 
-        # ENVÍO ASÍNCRONO REAL - No bloquea el worker
+        # ENVÍO ASÍNCRONO CON MEJOR LOGGING
         def send_async():
             try:
-                with app.app_context():
-                    print(f"Enviando correo a {user.email}...")
-                    mail.send(msg)
-                    print(f"Correo enviado exitosamente a {user.email}")
-            except Exception as e:
-                print(f"Error en hilo asíncrono para {user.email}: {str(e)}")
+                print(f"🚀 Iniciando envío REAL a {user.email}...")
 
-        # Iniciar hilo y no esperar a que termine
+                # Verificar configuración SMTP
+                print(f"🔧 Configuración SMTP:")
+                print(f"   Servidor: {app.config['MAIL_SERVER']}")
+                print(f"   Puerto: {app.config['MAIL_PORT']}")
+                print(f"   Usuario: {app.config['MAIL_USERNAME']}")
+                print(f"   Contraseña configurada: {'SÍ' if app.config['MAIL_PASSWORD'] else 'NO'}")
+
+                with app.app_context():
+                    mail.send(msg)
+                    print(f"✅ CORREO ENVIADO EXITOSAMENTE a {user.email}")
+
+            except Exception as e:
+                print(f"❌ ERROR CRÍTICO al enviar a {user.email}:")
+                print(f"   Tipo de error: {type(e).__name__}")
+                print(f"   Mensaje: {str(e)}")
+                import traceback
+                print(f"   Traceback completo:")
+                print(traceback.format_exc())
+
+        # Iniciar hilo
         thread = Thread(target=send_async)
-        thread.daemon = True  # Esto permite que el hilo se cierre cuando el main thread termine
+        thread.daemon = True
         thread.start()
 
-        print(f"Proceso de envío iniciado para {user.email} (no bloqueante)")
+        print(f"📨 Proceso de envío INICIADO para {user.email}")
         return True
 
     except Exception as e:
-        print(f"Error al preparar correo para {user.email}: {str(e)}")
+        print(f"💥 Error en preparación del correo para {user.email}: {str(e)}")
+        import traceback
+        print(f"🔍 Traceback: {traceback.format_exc()}")
         return False
 
 @app.context_processor
@@ -974,6 +991,25 @@ Email: {user.email}
     except Exception as e:
         print(f"❌ ERROR SÍNCRONO: {str(e)}")
         return False
+
+
+@app.route('/admin/email-status')
+@login_required
+def admin_email_status():
+    """Ruta para verificar el estado del servicio de correo"""
+    if not current_user.is_admin:
+        flash('No tienes permisos de administrador', 'error')
+        return redirect(url_for('dashboard'))
+
+    status_info = {
+        'mail_server': app.config.get('MAIL_SERVER'),
+        'mail_port': app.config.get('MAIL_PORT'),
+        'mail_username': app.config.get('MAIL_USERNAME'),
+        'mail_password_set': bool(app.config.get('MAIL_PASSWORD')),
+        'mail_use_tls': app.config.get('MAIL_USE_TLS')
+    }
+
+    return jsonify(status_info)
 
 # En desarrollo local
 if __name__ == '__main__':
