@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Panel Admin{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h4>👨‍💼 Panel de Administración</h4>
+            </div>
+            <div class="card-body">
+                <!-- Formulario para crear usuario -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h6>➕ Crear nuevo usuario</h6>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" action="{{ url_for('admin_create_user') }}">
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Nombre</label>
+                                    <input type="text" class="form-control" name="name"
+                                           placeholder="Ej: Juan Pérez" required>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Email</label>
+                                    <input type="email" class="form-control" name="email"
+                                           placeholder="Ej: juan@ejemplo.com" required>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Horas totales</label>
+                                    <input type="number" step="0.5" class="form-control"
+                                           name="total_hours" value="150" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-success">
+                                ➕ Crear usuario
+                            </button>
+                            <small class="text-muted d-block mt-2">
+                                El usuario recibirá acceso para configurar su contraseña en el primer login
+                            </small>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Lista de usuarios -->
+                <h6 class="mb-3">📋 Usuarios registrados</h6>
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Nombre</th>
+                            <th>Email</th>
+                            <th>Horas totales</th>
+                            <th>Estado</th>
+                            <th>Rol</th>
+                            <th>Acciones</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for user in users %}
+                        <tr>
+                            <td>{{ user.id }}</td>
+                            <td>{{ user.name }}</td>
+                            <td>{{ user.email }}</td>
+                            <td>{{ "%.1f"|format(user.total_hours_required) }}h</td>
+                            <td>
+                                {% if user.is_first_login %}
+                                <span class="badge bg-warning">⏳ Pendiente configurar</span>
+                                {% else %}
+                                <span class="badge bg-success">✅ Activo</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if user.is_admin %}
+                                <span class="badge bg-danger">👑 Admin</span>
+                                {% else %}
+                                <span class="badge bg-primary">👤 Usuario</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="btn-group" role="group">
+                                    <a href="{{ url_for('admin_user_records', user_id=user.id) }}"
+                                       class="btn btn-sm btn-outline-primary" title="Ver fichajes">
+                                        📋
+                                    </a>
+                                    {% if user.is_first_login and not user.password %}
+                                    <a href="{{ url_for('admin_resend_email', user_id=user.id) }}"
+                                       class="btn btn-sm btn-outline-info" title="Reenviar email de configuración">
+                                        📧
+                                    </a>
+                                    {% endif %}
+                                    {% if user.id != current_user.id %}
+                                    <a href="{{ url_for('admin_delete_user', user_id=user.id) }}"
+                                       class="btn btn-sm btn-outline-danger"
+                                       onclick="return confirm('¿Eliminar a {{ user.name }}?\n\nSe eliminarán todos sus fichajes y horarios.')"
+                                       title="Eliminar usuario">
+                                        🗑️
+                                    </a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

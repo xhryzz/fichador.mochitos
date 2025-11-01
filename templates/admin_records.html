@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Registros de {{ user.name }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4>📋 Fichajes de {{ user.name }}</h4>
+                <a href="{{ url_for('admin') }}" class="btn btn-sm btn-outline-primary">
+                    ← Volver al panel
+                </a>
+            </div>
+            <div class="card-body">
+                <!-- Formulario para añadir nuevo registro -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h6>➕ Añadir nuevo fichaje</h6>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" action="{{ url_for('admin_add_record') }}">
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Fecha</label>
+                                    <input type="date" class="form-control" name="date" required>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Hora entrada</label>
+                                    <input type="time" class="form-control" name="entry_time" required>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Hora salida</label>
+                                    <input type="time" class="form-control" name="exit_time">
+                                    <small class="text-muted">Dejar vacío si aún está activo</small>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-12 mb-3">
+                                    <label class="form-label">Ubicación</label>
+                                    <input type="text" class="form-control" name="location" placeholder="Lugar de trabajo">
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Latitud</label>
+                                    <input type="number" step="any" class="form-control" name="latitude" placeholder="37.8766614">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Longitud</label>
+                                    <input type="number" step="any" class="form-control" name="longitude" placeholder="-4.7831533">
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Notas</label>
+                                <textarea class="form-control" name="notes" rows="2" placeholder="Notas adicionales (opcional)"></textarea>
+                            </div>
+
+                            <button type="submit" class="btn btn-success">
+                                💾 Guardar fichaje
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Tabla de registros -->
+                <h6 class="mb-3">📊 Historial de fichajes</h6>
+
+                {% if records.items %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Entrada</th>
+                            <th>Salida</th>
+                            <th>Duración</th>
+                            <th>Ubicación</th>
+                            <th>Acciones</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for record in records.items %}
+                        <tr class="{{ 'table-warning' if not record.exit_time }}">
+                            <td>{{ record.date.strftime('%d/%m/%Y') }}</td>
+                            <td>{{ record.entry_time.strftime('%H:%M') }}</td>
+                            <td>
+                                {% if record.exit_time %}
+                                {{ record.exit_time.strftime('%H:%M') }}
+                                {% else %}
+                                <span class="badge bg-warning">En curso</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if record.exit_time %}
+                                {{ "%.2f"|format((record.exit_time - record.entry_time).total_seconds() / 3600) }}h
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                            <td>
+                                <small>{{ record.location|truncate(30) if record.location else '-' }}</small>
+                            </td>
+                            <td>
+                                <div class="btn-group" role="group">
+                                    <a href="{{ url_for('admin_edit_record', record_id=record.id) }}"
+                                       class="btn btn-sm btn-outline-primary" title="Editar">
+                                        ✏️
+                                    </a>
+                                    <a href="{{ url_for('admin_delete_record', record_id=record.id) }}"
+                                       class="btn btn-sm btn-outline-danger"
+                                       onclick="return confirm('¿Estás seguro de eliminar este fichaje?\n\nFecha: {{ record.date.strftime('%d/%m/%Y') }}\nEntrada: {{ record.entry_time.strftime('%H:%M') }}\nSalida: {{ record.exit_time.strftime('%H:%M') if record.exit_time else 'En curso' }}')"
+                                       title="Eliminar">
+                                        🗑️
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Paginación -->
+                {% if records.pages > 1 %}
+                <nav>
+                    <ul class="pagination justify-content-center">
+                        {% if records.has_prev %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('admin_user_records', user_id=user.id, page=records.prev_num) }}">
+                                ← Anterior
+                            </a>
+                        </li>
+                        {% endif %}
+
+                        {% for page_num in records.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+                        {% if page_num %}
+                        <li class="page-item {{ 'active' if page_num == records.page }}">
+                            <a class="page-link" href="{{ url_for('admin_user_records', user_id=user.id, page=page_num) }}">
+                                {{ page_num }}
+                            </a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled">
+                            <span class="page-link">...</span>
+                        </li>
+                        {% endif %}
+                        {% endfor %}
+
+                        {% if records.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('admin_user_records', user_id=user.id, page=records.next_num) }}">
+                                Siguiente →
+                            </a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+
+                <!-- Resumen -->
+                <div class="alert alert-info mt-4">
+                    <strong>📈 Resumen:</strong>
+                    Total de {{ records.total }} fichajes registrados
+                    {% if records.total > 0 %}
+                    | Página {{ records.page }} de {{ records.pages }}
+                    {% endif %}
+                </div>
+
+                {% else %}
+                <div class="alert alert-warning">
+                    ⚠️ No hay fichajes registrados para este usuario aún.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

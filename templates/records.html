@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Mis Registros{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h4>Mis Registros</h4>
+            </div>
+            <div class="card-body">
+                {% if records.items %}
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Entrada</th>
+                                <th>Salida</th>
+                                <th>Horas</th>
+                                <th>Ubicación</th>
+                                <th>Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for record in records.items %}
+                            <tr>
+                                <td>{{ record.date.strftime('%d/%m/%Y') }}</td>
+                                <td>{{ record.entry_time.strftime('%H:%M') }}</td>
+                                <td>
+                                    {% if record.exit_time %}
+                                        {{ record.exit_time.strftime('%H:%M') }}
+                                    {% else %}
+                                        <span class="badge bg-warning">En curso</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if record.exit_time %}
+                                        {{ "%.2f"|format((record.exit_time - record.entry_time).total_seconds() / 3600) }}h
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if record.latitude and record.longitude %}
+                                    <button class="btn btn-sm btn-outline-primary view-map-btn" 
+                                            data-lat="{{ record.latitude }}" 
+                                            data-lng="{{ record.longitude }}"
+                                            data-location="{{ record.location }}">
+                                        <i class="fas fa-map-marker-alt"></i> Ver mapa
+                                    </button>
+                                    {% else %}
+                                    <span title="{{ record.location }}">{{ record.location|truncate(30) }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if record.exit_time %}
+                                        <span class="badge bg-success">Completado</span>
+                                    {% else %}
+                                        <span class="badge bg-warning">Activo</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Paginación -->
+                <nav>
+                    <ul class="pagination justify-content-center">
+                        {% if records.has_prev %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('records', page=records.prev_num) }}">Anterior</a>
+                        </li>
+                        {% endif %}
+                        {% for page_num in records.iter_pages() %}
+                            {% if page_num %}
+                                <li class="page-item {{ 'active' if page_num == records.page else '' }}">
+                                    <a class="page-link" href="{{ url_for('records', page=page_num) }}">{{ page_num }}</a>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                        {% if records.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('records', page=records.next_num) }}">Siguiente</a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% else %}
+                <p class="text-center">No hay registros.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para ver mapa de registros -->
+<div class="modal fade" id="recordMapModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Ubicación del fichaje</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="modalLocationText" class="mb-3"></p>
+                <div id="recordMap" style="height: 400px; border-radius: 10px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Función para mostrar mapa de registro histórico
+function showRecordMap(lat, lng, location) {
+    document.getElementById('modalLocationText').textContent = location;
+    
+    // Limpiar mapa existente
+    const mapContainer = document.getElementById('recordMap');
+    if (mapContainer._leaflet_id) {
+        mapContainer._leaflet_id = null;
+        mapContainer.innerHTML = '';
+    }
+    
+    // Pequeño delay para asegurar que el contenedor está listo
+    setTimeout(() => {
+        const recordMap = L.map('recordMap').setView([lat, lng], 16);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(recordMap);
+        
+        L.marker([lat, lng]).addTo(recordMap)
+            .bindPopup('Ubicación registrada')
+            .openPopup();
+    }, 100);
+}
+
+// Configurar event listeners para los botones de ver mapa
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.view-map-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const lat = parseFloat(this.getAttribute('data-lat'));
+            const lng = parseFloat(this.getAttribute('data-lng'));
+            const location = this.getAttribute('data-location');
+            
+            showRecordMap(lat, lng, location);
+            new bootstrap.Modal(document.getElementById('recordMapModal')).show();
+        });
+    });
+});
+</script>
+{% endblock %}

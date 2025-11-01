@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Registro{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h4>Editar Registro</h4>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Fecha</label>
+                        <input type="text" class="form-control" value="{{ record.date.strftime('%d/%m/%Y') }}" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label for="entry_time" class="form-label">Hora de entrada</label>
+                        <input type="time" class="form-control" id="entry_time" name="entry_time" 
+                               value="{{ record.entry_time.strftime('%H:%M') }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="exit_time" class="form-label">Hora de salida</label>
+                        <input type="time" class="form-control" id="exit_time" name="exit_time" 
+                               value="{{ record.exit_time.strftime('%H:%M') if record.exit_time else '' }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="notes" class="form-label">Notas</label>
+                        <textarea class="form-control" id="notes" name="notes" rows="3">{{ record.notes or '' }}</textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                    <a href="{{ url_for('admin_user_records', user_id=record.user_id) }}" class="btn btn-secondary">Cancelar</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

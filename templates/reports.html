@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Informes{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h4>Generar Informe</h4>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('generate_report') }}">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="start_date" class="form-label">Fecha inicio</label>
+                                <input type="date" class="form-control" id="start_date" name="start_date" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="end_date" class="form-label">Fecha fin</label>
+                                <input type="date" class="form-control" id="end_date" name="end_date" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="report_type" class="form-label">Tipo de informe</label>
+                        <select class="form-select" id="report_type" name="report_type" required>
+                            <option value="pdf">PDF</option>
+                            <option value="csv">CSV</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Generar Informe</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
