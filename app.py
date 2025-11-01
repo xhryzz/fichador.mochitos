@@ -1,8 +1,6 @@
-
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from flask_mail import Mail, Message
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 from itsdangerous import URLSafeTimedSerializer
@@ -12,8 +10,7 @@ import io
 import os
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-from threading import Thread
-
+import resend
 
 app = Flask(__name__)
 
@@ -34,20 +31,13 @@ else:
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Configuración de Flask-Mail para Gmail
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', 'christianconhr@gmail.com')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', 'qwfeeqryixmfpvul')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME', 'christianconhr@gmail.com')
+# Configurar Resend
+resend.api_key = os.environ.get("RESEND_API_KEY")
 
 db = SQLAlchemy(app)
-mail = Mail(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
-
 
 # Serializer para generar tokens seguros
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
@@ -90,7 +80,7 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 # ============================================
-# FUNCIONES DE CORREO
+# FUNCIONES DE CORREO CON RESEND
 # ============================================
 
 def generate_token(user_id):
@@ -104,163 +94,137 @@ def verify_token(token, expiration=86400):
         return user_id
     except:
         return None
-def send_async_email(app, msg, user_email):
-    """Envía el correo de forma asíncrona con mejor manejo"""
-    with app.app_context():
-        try:
-            print(f"📧 Intentando enviar correo a: {user_email}")
-            mail.send(msg)
-            print(f"✅ Correo enviado exitosamente a {user_email}")
-            return True
-        except Exception as e:
-            print(f"❌ Error CRÍTICO al enviar correo a {user_email}: {str(e)}")
-            import traceback
-            print(f"🔍 Traceback completo: {traceback.format_exc()}")
-            return False
 
 def send_setup_password_email(user):
-    """Envía correo con enlace para configurar contraseña - Versión ASÍNCRONA MEJORADA"""
+    """Envía correo con enlace para configurar contraseña usando Resend"""
     try:
         if not user or not user.email:
             print("❌ No se pudo enviar el correo: usuario o email inválido")
             return False
 
-        print(f"📧 Preparando envío a: {user.email}")
+        print(f"🚀 Enviando correo con Resend a: {user.email}")
+
+        # Verificar que Resend está configurado
+        if not resend.api_key:
+            print("❌ RESEND_API_KEY no configurada")
+            return False
 
         token = generate_token(user.id)
         setup_url = url_for('set_first_password_token', token=token, _external=True)
 
-        print(f"🔗 URL generada: {setup_url}")
-
-        html_body = f'''
+        # HTML moderno y responsive
+        html_content = f'''
         <!DOCTYPE html>
-        <html lang="es">
+        <html>
         <head>
-            <meta charset="UTF-8">
+            <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Configura tu contraseña - Fichador</title>
+            <title>Configura tu contraseña</title>
             <style>
                 body {{
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                    background: #FFF;
-                    color: #000;
-                    line-height: 1.5;
-                    margin: 0;
-                    padding: 0;
-                }}
-                .container {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
                     max-width: 600px;
                     margin: 0 auto;
-                    padding: 1.5rem 1rem;
+                    padding: 20px;
+                    background-color: #f8f9fa;
                 }}
-                .card {{
-                    background: #FFF;
-                    border: 1px solid #C6C6C8;
+                .container {{
+                    background: white;
                     border-radius: 12px;
-                    margin-bottom: 1rem;
+                    padding: 40px;
+                    margin: 20px 0;
+                    border: 1px solid #e1e5e9;
                 }}
-                .card-header {{
-                    border-bottom: 1px solid #C6C6C8;
-                    padding: 1rem;
-                    font-weight: 600;
-                    font-size: 1.2rem;
-                }}
-                .card-body {{
-                    padding: 1rem;
-                }}
-                .btn {{
-                    border: none;
-                    border-radius: 8px;
-                    font-weight: 600;
-                    padding: 0.6rem 1.2rem;
-                    text-decoration: none;
-                    display: inline-block;
+                .header {{
                     text-align: center;
-                    transition: opacity 0.2s, transform 0.2s;
+                    margin-bottom: 30px;
+                    border-bottom: 1px solid #e1e5e9;
+                    padding-bottom: 20px;
                 }}
-                .btn-primary {{
-                    background: #007AFF;
-                    color: #fff;
-                }}
-                .btn:hover {{
-                    opacity: 0.9;
-                    transform: translateY(-1px);
-                }}
-                .alert {{
-                    border: none;
-                    border-radius: 8px;
-                    padding: 1rem;
-                    border-left: 4px solid;
-                    margin: 1rem 0;
-                }}
-                .alert-info {{
-                    background: rgba(0, 122, 255, 0.1);
+                .logo {{
+                    font-size: 24px;
+                    font-weight: 700;
                     color: #007AFF;
-                    border-color: #007AFF;
+                    margin-bottom: 8px;
+                }}
+                .welcome {{
+                    font-size: 20px;
+                    color: #1f2937;
+                    margin-bottom: 10px;
+                }}
+                .content {{
+                    margin: 30px 0;
+                }}
+                .button {{
+                    display: inline-block;
+                    background: #007AFF;
+                    color: white;
+                    padding: 14px 32px;
+                    text-decoration: none;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    font-size: 16px;
+                    margin: 20px 0;
+                    text-align: center;
                 }}
                 .details {{
-                    background: #F2F2F7;
-                    padding: 1rem;
+                    background: #f8fafc;
+                    padding: 20px;
                     border-radius: 8px;
-                    margin: 1.5rem 0;
+                    margin: 25px 0;
+                    font-size: 14px;
                 }}
                 .info-item {{
-                    margin: 0.5rem 0;
-                    font-size: 0.9rem;
+                    margin: 8px 0;
                 }}
                 .footer {{
                     text-align: center;
-                    margin-top: 2rem;
-                    color: #8E8E93;
-                    font-size: 0.8rem;
-                    border-top: 1px solid #C6C6C8;
-                    padding-top: 1rem;
+                    margin-top: 30px;
+                    color: #6b7280;
+                    font-size: 14px;
+                    border-top: 1px solid #e1e5e9;
+                    padding-top: 20px;
                 }}
-                .text-sec {{
-                    color: #8E8E93;
-                }}
-                .text-center {{
+                .alert {{
+                    background: #eff6ff;
+                    border: 1px solid #3b82f6;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin: 20px 0;
                     text-align: center;
-                }}
-                .mb-2 {{
-                    margin-bottom: 0.5rem;
-                }}
-                .mb-3 {{
-                    margin-bottom: 1rem;
-                }}
-                .mt-3 {{
-                    margin-top: 1rem;
                 }}
             </style>
         </head>
         <body>
             <div class="container">
-                <div class="card">
-                    <div class="card-header">
-                        Fichador
+                <div class="header">
+                    <div class="logo">Fichador</div>
+                    <div class="welcome">Bienvenido, {user.name}</div>
+                </div>
+
+                <div class="content">
+                    <p>Se ha creado una cuenta para ti en Fichador. Para comenzar a usar la plataforma, configura tu contraseña.</p>
+
+                    <div style="text-align: center;">
+                        <a href="{setup_url}" class="button">
+                            Configurar Contraseña
+                        </a>
                     </div>
-                    <div class="card-body">
-                        <h3 class="text-center mb-3">Bienvenido, {user.name}</h3>
 
-                        <p>Se ha creado una cuenta para ti en Fichador. Para comenzar a usar la plataforma, configura tu contraseña.</p>
-
-                        <div class="text-center">
-                            <a href="{setup_url}" class="btn btn-primary">
-                                Configurar contraseña
-                            </a>
-                        </div>
-
-                        <div class="alert alert-info">
-                            <strong>Importante:</strong> Este enlace es válido por 24 horas.
-                        </div>
-
-                        <div class="details">
-                            <div class="info-item"><strong>Email:</strong> {user.email}</div>
-                            <div class="info-item"><strong>Horas requeridas:</strong> {user.total_hours_required} horas</div>
-                        </div>
-
-                        <p class="text-sec">Si no solicitaste esta cuenta, puedes ignorar este mensaje.</p>
+                    <div class="alert">
+                        <strong>⚠️ Importante:</strong> Este enlace es válido por 24 horas.
                     </div>
+
+                    <div class="details">
+                        <div class="info-item"><strong>📧 Email:</strong> {user.email}</div>
+                        <div class="info-item"><strong>⏰ Horas requeridas:</strong> {user.total_hours_required} horas</div>
+                    </div>
+
+                    <p style="color: #6b7280; font-size: 14px;">
+                        Si no solicitaste esta cuenta, puedes ignorar este mensaje de forma segura.
+                    </p>
                 </div>
 
                 <div class="footer">
@@ -272,14 +236,15 @@ def send_setup_password_email(user):
         </html>
         '''
 
-        text_body = f'''
+        # Versión texto plano
+        text_content = f'''
         Fichador - Configura tu contraseña
 
         Hola {user.name},
 
         Se ha creado una cuenta para ti en Fichador.
 
-        Para configurar tu contraseña, visita:
+        Para configurar tu contraseña, visita este enlace:
         {setup_url}
 
         Este enlace es válido por 24 horas.
@@ -294,47 +259,24 @@ def send_setup_password_email(user):
         Equipo Fichador
         '''
 
-        msg = Message(
-            subject='Configura tu contraseña - Fichador',
-            recipients=[user.email],
-            html=html_body,
-            body=text_body
-        )
+        # Enviar con Resend
+        params = {
+            "from": "Fichador <onboarding@resend.dev>",
+            "to": [user.email],
+            "subject": "Configura tu contraseña - Fichador",
+            "html": html_content,
+            "text": text_content
+        }
 
-        # ENVÍO ASÍNCRONO CON MEJOR LOGGING
-        def send_async():
-            try:
-                print(f"🚀 Iniciando envío REAL a {user.email}...")
+        response = resend.Emails.send(params)
 
-                # Verificar configuración SMTP
-                print(f"🔧 Configuración SMTP:")
-                print(f"   Servidor: {app.config['MAIL_SERVER']}")
-                print(f"   Puerto: {app.config['MAIL_PORT']}")
-                print(f"   Usuario: {app.config['MAIL_USERNAME']}")
-                print(f"   Contraseña configurada: {'SÍ' if app.config['MAIL_PASSWORD'] else 'NO'}")
-
-                with app.app_context():
-                    mail.send(msg)
-                    print(f"✅ CORREO ENVIADO EXITOSAMENTE a {user.email}")
-
-            except Exception as e:
-                print(f"❌ ERROR CRÍTICO al enviar a {user.email}:")
-                print(f"   Tipo de error: {type(e).__name__}")
-                print(f"   Mensaje: {str(e)}")
-                import traceback
-                print(f"   Traceback completo:")
-                print(traceback.format_exc())
-
-        # Iniciar hilo
-        thread = Thread(target=send_async)
-        thread.daemon = True
-        thread.start()
-
-        print(f"📨 Proceso de envío INICIADO para {user.email}")
+        print(f"✅ Correo enviado exitosamente con Resend")
+        print(f"   ID: {response['id']}")
+        print(f"   Para: {user.email}")
         return True
 
     except Exception as e:
-        print(f"💥 Error en preparación del correo para {user.email}: {str(e)}")
+        print(f"❌ Error al enviar correo con Resend: {str(e)}")
         import traceback
         print(f"🔍 Traceback: {traceback.format_exc()}")
         return False
@@ -748,13 +690,14 @@ def admin_create_user():
 
     print(f"👤 Usuario creado: {name} ({email})")
 
-    # ENVÍO ASÍNCRONO - No bloquea la respuesta
+    # ENVÍO CON RESEND
     if send_setup_password_email(new_user):
-        flash(f'✅ Usuario {name} creado correctamente. Se está enviando el correo a {email}...', 'success')
+        flash(f'✅ Usuario {name} creado correctamente. Se ha enviado el correo a {email}', 'success')
     else:
-        flash(f'⚠️ Usuario {name} creado, pero hubo un error al preparar el envío del correo.', 'warning')
+        flash(f'⚠️ Usuario {name} creado, pero hubo un error al enviar el correo.', 'warning')
 
     return redirect(url_for('admin'))
+
 @app.route('/admin/resend_email/<int:user_id>')
 @login_required
 def admin_resend_email(user_id):
@@ -770,13 +713,13 @@ def admin_resend_email(user_id):
 
     print(f"🔄 Reenviando correo a {user.email}...")
 
-    # CORREGIDO: Usar la función principal
     if send_setup_password_email(user):
         flash(f'✅ Correo REENVIADO exitosamente a {user.email}', 'success')
     else:
         flash(f'❌ Error al reenviar el correo', 'error')
 
     return redirect(url_for('admin'))
+
 @app.route('/admin/delete_user/<int:user_id>')
 @login_required
 def admin_delete_user(user_id):
@@ -896,6 +839,62 @@ def api_active_record():
     active_record = TimeRecord.query.filter_by(user_id=current_user.id, date=today, exit_time=None).first()
     return jsonify({'has_active_record': active_record is not None, 'entry_time': active_record.entry_time.isoformat() if active_record else None})
 
+# Rutas para probar Resend
+@app.route('/admin/test-resend')
+@login_required
+def test_resend():
+    """Ruta para probar Resend (solo admin)"""
+    if not current_user.is_admin:
+        flash('No tienes permisos', 'error')
+        return redirect(url_for('dashboard'))
+
+    try:
+        if not resend.api_key:
+            flash('❌ RESEND_API_KEY no configurada', 'error')
+            return redirect(url_for('admin'))
+
+        params = {
+            "from": "Fichador <onboarding@resend.dev>",
+            "to": [current_user.email],
+            "subject": "Prueba de Resend - Fichador",
+            "html": """
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #007AFF;">✅ Resend funciona correctamente</h2>
+                <p>Este es un correo de prueba enviado desde tu aplicación Fichador.</p>
+                <p><strong>Hora:</strong> """ + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """</p>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                    <p style="margin: 0;">Si recibes este correo, Resend está configurado correctamente.</p>
+                </div>
+            </div>
+            """,
+            "text": f"Resend funciona correctamente. Hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        }
+
+        response = resend.Emails.send(params)
+
+        flash(f'✅ Correo de prueba enviado con Resend. ID: {response["id"]}', 'success')
+        print(f"📧 Correo de prueba enviado: {response['id']}")
+
+    except Exception as e:
+        flash(f'❌ Error con Resend: {str(e)}', 'error')
+        print(f"❌ Error en test-resend: {str(e)}")
+
+    return redirect(url_for('admin'))
+
+@app.route('/admin/resend-status')
+@login_required
+def resend_status():
+    """Verificar estado de Resend"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'No autorizado'}), 403
+
+    status = {
+        'resend_configured': bool(resend.api_key),
+        'api_key_length': len(resend.api_key) if resend.api_key else 0
+    }
+
+    return jsonify(status)
+
 # Error handlers
 @app.errorhandler(404)
 def not_found_error(error):
@@ -925,91 +924,6 @@ def init_db():
             db.session.commit()
             print("✓ Usuario Admin Christian creado")
         print("✅ Base de datos inicializada correctamente")
-
-@app.route('/test-email')
-@login_required
-def test_email():
-    """Ruta para probar el envío de correos (solo admin)"""
-    if not current_user.is_admin:
-        flash('No tienes permisos', 'error')
-        return redirect(url_for('dashboard'))
-
-    try:
-        msg = Message(
-            subject='Test Email - Fichador Mochitos',
-            recipients=[current_user.email],
-            body=f'''Este es un correo de prueba de Fichador Mochitos.
-
-Hora del envío: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-
-Si recibes este correo, la configuración SMTP está funcionando correctamente.
-
-Saludos,
-Sistema Fichador Mochitos
-'''
-        )
-
-        # Enviar de forma síncrona para ver errores inmediatamente
-        mail.send(msg)
-        flash('✅ Correo de prueba enviado correctamente', 'success')
-    except Exception as e:
-        flash(f'❌ Error al enviar correo de prueba: {str(e)}', 'error')
-        print(f"❌ Error detallado: {str(e)}")
-        import traceback
-        print(f"🔍 Traceback: {traceback.format_exc()}")
-
-    return redirect(url_for('admin'))
-
-
-def send_setup_password_email_sync(user):
-    """Versión síncrona para debugging"""
-    try:
-        print(f"🔧 MODO SÍNCRONO: Enviando correo a {user.email}")
-
-        token = generate_token(user.id)
-        setup_url = url_for('set_first_password_token', token=token, _external=True)
-
-        msg = Message(
-            subject='[TEST] Configura tu contraseña - Fichador Mochitos',
-            recipients=[user.email],
-            body=f'''Hola {user.name},
-
-ESTE ES UN CORREO DE PRUEBA SÍNCRONO.
-
-Para activar tu cuenta, configura tu contraseña en:
-{setup_url}
-
-Email: {user.email}
-'''
-        )
-
-        # Envío síncrono
-        mail.send(msg)
-        print(f"✅ CORREO SÍNCRONO ENVIADO a {user.email}")
-        return True
-
-    except Exception as e:
-        print(f"❌ ERROR SÍNCRONO: {str(e)}")
-        return False
-
-
-@app.route('/admin/email-status')
-@login_required
-def admin_email_status():
-    """Ruta para verificar el estado del servicio de correo"""
-    if not current_user.is_admin:
-        flash('No tienes permisos de administrador', 'error')
-        return redirect(url_for('dashboard'))
-
-    status_info = {
-        'mail_server': app.config.get('MAIL_SERVER'),
-        'mail_port': app.config.get('MAIL_PORT'),
-        'mail_username': app.config.get('MAIL_USERNAME'),
-        'mail_password_set': bool(app.config.get('MAIL_PASSWORD')),
-        'mail_use_tls': app.config.get('MAIL_USE_TLS')
-    }
-
-    return jsonify(status_info)
 
 # En desarrollo local
 if __name__ == '__main__':
