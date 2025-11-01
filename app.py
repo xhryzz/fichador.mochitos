@@ -92,7 +92,7 @@ def load_user(user_id):
 # FUNCIONES DE CORREO
 # ============================================
 
-ef generate_token(user_id):
+def generate_token(user_id):
     """Genera un token seguro para el usuario"""
     return serializer.dumps(user_id, salt='password-setup-salt')
 
