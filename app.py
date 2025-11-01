@@ -48,6 +48,7 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
+
 # Serializer para generar tokens seguros
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
@@ -103,45 +104,215 @@ def verify_token(token, expiration=86400):
         return user_id
     except:
         return None
-
-def send_async_email(app, msg):
-    """Envía el correo de forma asíncrona"""
+def send_async_email(app, msg, user_email):
+    """Envía el correo de forma asíncrona con mejor manejo"""
     with app.app_context():
         try:
+            print(f"📧 Intentando enviar correo a: {user_email}")
             mail.send(msg)
-            print(f"✅ Correo enviado exitosamente")
+            print(f"✅ Correo enviado exitosamente a {user_email}")
+            return True
         except Exception as e:
-            print(f"❌ Error al enviar correo: {e}")
+            print(f"❌ Error CRÍTICO al enviar correo a {user_email}: {str(e)}")
+            import traceback
+            print(f"🔍 Traceback completo: {traceback.format_exc()}")
+            return False
 
 def send_setup_password_email(user):
-    """Envía correo con enlace para configurar contraseña"""
-    token = generate_token(user.id)
-    setup_url = url_for('set_first_password_token', token=token, _external=True)
-
-    msg = Message(
-        subject='Configura tu contraseña - Fichador Mochitos',
-        recipients=[user.email],
-        body=f'''Hola {user.name},
-
-Se ha creado una cuenta para ti en Fichador Mochitos.
-
-Para activar tu cuenta, configura tu contraseña en el siguiente enlace:
-{setup_url}
-
-Este enlace es válido por 24 horas.
-Tu email de acceso: {user.email}
-
-Si no solicitaste esta cuenta, ignora este correo.
-'''
-    )
-
+    """Envía correo con enlace para configurar contraseña - Versión SÍNCRONA"""
     try:
-        # Enviar de forma asíncrona
-        Thread(target=send_async_email, args=(app._get_current_object(), msg)).start()
+        if not user or not user.email:
+            print("No se pudo enviar el correo: usuario o email inválido")
+            return False
+
+        print(f"Enviando correo de configuración a: {user.email}")
+
+        token = generate_token(user.id)
+        setup_url = url_for('set_first_password_token', token=token, _external=True)
+
+        # Correo con el mismo estilo CSS de la web
+        html_body = f'''
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Configura tu contraseña - Fichador</title>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                    background: #FFF;
+                    color: #000;
+                    line-height: 1.5;
+                    margin: 0;
+                    padding: 0;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 1.5rem 1rem;
+                }}
+                .card {{
+                    background: #FFF;
+                    border: 1px solid #C6C6C8;
+                    border-radius: 12px;
+                    margin-bottom: 1rem;
+                }}
+                .card-header {{
+                    border-bottom: 1px solid #C6C6C8;
+                    padding: 1rem;
+                    font-weight: 600;
+                    font-size: 1.2rem;
+                }}
+                .card-body {{
+                    padding: 1rem;
+                }}
+                .btn {{
+                    border: none;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    padding: 0.6rem 1.2rem;
+                    text-decoration: none;
+                    display: inline-block;
+                    text-align: center;
+                    transition: opacity 0.2s, transform 0.2s;
+                }}
+                .btn-primary {{
+                    background: #007AFF;
+                    color: #fff;
+                }}
+                .btn:hover {{
+                    opacity: 0.9;
+                    transform: translateY(-1px);
+                }}
+                .alert {{
+                    border: none;
+                    border-radius: 8px;
+                    padding: 1rem;
+                    border-left: 4px solid;
+                    margin: 1rem 0;
+                }}
+                .alert-info {{
+                    background: rgba(0, 122, 255, 0.1);
+                    color: #007AFF;
+                    border-color: #007AFF;
+                }}
+                .details {{
+                    background: #F2F2F7;
+                    padding: 1rem;
+                    border-radius: 8px;
+                    margin: 1.5rem 0;
+                }}
+                .info-item {{
+                    margin: 0.5rem 0;
+                    font-size: 0.9rem;
+                }}
+                .footer {{
+                    text-align: center;
+                    margin-top: 2rem;
+                    color: #8E8E93;
+                    font-size: 0.8rem;
+                    border-top: 1px solid #C6C6C8;
+                    padding-top: 1rem;
+                }}
+                .text-sec {{
+                    color: #8E8E93;
+                }}
+                .text-center {{
+                    text-align: center;
+                }}
+                .mb-2 {{
+                    margin-bottom: 0.5rem;
+                }}
+                .mb-3 {{
+                    margin-bottom: 1rem;
+                }}
+                .mt-3 {{
+                    margin-top: 1rem;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="card">
+                    <div class="card-header">
+                        Fichador
+                    </div>
+                    <div class="card-body">
+                        <h3 class="text-center mb-3">Bienvenido, {user.name}</h3>
+
+                        <p>Se ha creado una cuenta para ti en Fichador. Para comenzar a usar la plataforma, configura tu contraseña.</p>
+
+                        <div class="text-center">
+                            <a href="{setup_url}" class="btn btn-primary">
+                                Configurar contraseña
+                            </a>
+                        </div>
+
+                        <div class="alert alert-info">
+                            <strong>Importante:</strong> Este enlace es válido por 24 horas.
+                        </div>
+
+                        <div class="details">
+                            <div class="info-item"><strong>Email:</strong> {user.email}</div>
+                            <div class="info-item"><strong>Horas requeridas:</strong> {user.total_hours_required} horas</div>
+                        </div>
+
+                        <p class="text-sec">Si no solicitaste esta cuenta, puedes ignorar este mensaje.</p>
+                    </div>
+                </div>
+
+                <div class="footer">
+                    <p>Equipo Fichador</p>
+                    <p>Este es un mensaje automático</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+
+        # Versión texto plano
+        text_body = f'''
+        Fichador - Configura tu contraseña
+
+        Hola {user.name},
+
+        Se ha creado una cuenta para ti en Fichador.
+
+        Para configurar tu contraseña, visita:
+        {setup_url}
+
+        Este enlace es válido por 24 horas.
+
+        Tus datos:
+        - Email: {user.email}
+        - Horas requeridas: {user.total_hours_required} horas
+
+        Si no solicitaste esta cuenta, ignora este mensaje.
+
+        --
+        Equipo Fichador
+        '''
+
+        msg = Message(
+            subject='Configura tu contraseña - Fichador',
+            recipients=[user.email],
+            html=html_body,
+            body=text_body
+        )
+
+        # ENVÍO SÍNCRONO
+        mail.send(msg)
+        print(f"Correo enviado exitosamente a {user.email}")
         return True
+
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error al enviar correo a {user.email}: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
         return False
+
+
 
 @app.context_processor
 def inject_now():
@@ -550,14 +721,15 @@ def admin_create_user():
     db.session.add(new_user)
     db.session.commit()
 
-    # Enviar correo con enlace para configurar contraseña
+    print(f"👤 Usuario creado: {name} ({email})")
+
+    # ENVÍO SÍNCRONO (más confiable)
     if send_setup_password_email(new_user):
         flash(f'✅ Usuario {name} creado correctamente. Se ha enviado un correo a {email} para configurar su contraseña', 'success')
     else:
-        flash(f'⚠️ Usuario {name} creado, pero hubo un error al enviar el correo. Puede usar el botón de reenvío', 'warning')
+        flash(f'⚠️ Usuario {name} creado, pero hubo un error al enviar el correo. Usa el botón de reenvío (📧)', 'warning')
 
     return redirect(url_for('admin'))
-
 @app.route('/admin/resend_email/<int:user_id>')
 @login_required
 def admin_resend_email(user_id):
@@ -571,13 +743,15 @@ def admin_resend_email(user_id):
         flash('Este usuario ya ha configurado su contraseña', 'info')
         return redirect(url_for('admin'))
 
+    print(f"🔄 Reenviando correo a {user.email}...")
+
+    # CORREGIDO: Usar la función principal
     if send_setup_password_email(user):
-        flash(f'✅ Correo reenviado a {user.email}', 'success')
+        flash(f'✅ Correo REENVIADO exitosamente a {user.email}', 'success')
     else:
-        flash(f'❌ Error al enviar el correo', 'error')
+        flash(f'❌ Error al reenviar el correo', 'error')
 
     return redirect(url_for('admin'))
-
 @app.route('/admin/delete_user/<int:user_id>')
 @login_required
 def admin_delete_user(user_id):
@@ -726,6 +900,72 @@ def init_db():
             db.session.commit()
             print("✓ Usuario Admin Christian creado")
         print("✅ Base de datos inicializada correctamente")
+
+@app.route('/test-email')
+@login_required
+def test_email():
+    """Ruta para probar el envío de correos (solo admin)"""
+    if not current_user.is_admin:
+        flash('No tienes permisos', 'error')
+        return redirect(url_for('dashboard'))
+
+    try:
+        msg = Message(
+            subject='Test Email - Fichador Mochitos',
+            recipients=[current_user.email],
+            body=f'''Este es un correo de prueba de Fichador Mochitos.
+
+Hora del envío: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+Si recibes este correo, la configuración SMTP está funcionando correctamente.
+
+Saludos,
+Sistema Fichador Mochitos
+'''
+        )
+
+        # Enviar de forma síncrona para ver errores inmediatamente
+        mail.send(msg)
+        flash('✅ Correo de prueba enviado correctamente', 'success')
+    except Exception as e:
+        flash(f'❌ Error al enviar correo de prueba: {str(e)}', 'error')
+        print(f"❌ Error detallado: {str(e)}")
+        import traceback
+        print(f"🔍 Traceback: {traceback.format_exc()}")
+
+    return redirect(url_for('admin'))
+
+
+def send_setup_password_email_sync(user):
+    """Versión síncrona para debugging"""
+    try:
+        print(f"🔧 MODO SÍNCRONO: Enviando correo a {user.email}")
+
+        token = generate_token(user.id)
+        setup_url = url_for('set_first_password_token', token=token, _external=True)
+
+        msg = Message(
+            subject='[TEST] Configura tu contraseña - Fichador Mochitos',
+            recipients=[user.email],
+            body=f'''Hola {user.name},
+
+ESTE ES UN CORREO DE PRUEBA SÍNCRONO.
+
+Para activar tu cuenta, configura tu contraseña en:
+{setup_url}
+
+Email: {user.email}
+'''
+        )
+
+        # Envío síncrono
+        mail.send(msg)
+        print(f"✅ CORREO SÍNCRONO ENVIADO a {user.email}")
+        return True
+
+    except Exception as e:
+        print(f"❌ ERROR SÍNCRONO: {str(e)}")
+        return False
 
 # En desarrollo local
 if __name__ == '__main__':
