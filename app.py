@@ -12,6 +12,8 @@ import io
 import os
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
+from threading import Thread
+
 
 app = Flask(__name__)
 
@@ -90,7 +92,7 @@ def load_user(user_id):
 # FUNCIONES DE CORREO
 # ============================================
 
-def generate_token(user_id):
+ef generate_token(user_id):
     """Genera un token seguro para el usuario"""
     return serializer.dumps(user_id, salt='password-setup-salt')
 
@@ -102,56 +104,43 @@ def verify_token(token, expiration=86400):
     except:
         return None
 
+def send_async_email(app, msg):
+    """Envía el correo de forma asíncrona"""
+    with app.app_context():
+        try:
+            mail.send(msg)
+            print(f"✅ Correo enviado exitosamente")
+        except Exception as e:
+            print(f"❌ Error al enviar correo: {e}")
+
 def send_setup_password_email(user):
     """Envía correo con enlace para configurar contraseña"""
     token = generate_token(user.id)
     setup_url = url_for('set_first_password_token', token=token, _external=True)
 
     msg = Message(
-        subject='🔐 Configura tu contraseña - Fichador Mochitos',
+        subject='Configura tu contraseña - Fichador Mochitos',
         recipients=[user.email],
-        html=f'''
-        <html>
-            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-                    <h2 style="color: #4CAF50;">¡Bienvenido/a {user.name}! 👋</h2>
-                    <p>Se ha creado una cuenta para ti en <strong>Fichador Mochitos</strong>.</p>
+        body=f'''Hola {user.name},
 
-                    <p>Para activar tu cuenta, necesitas configurar tu contraseña haciendo clic en el siguiente enlace:</p>
+Se ha creado una cuenta para ti en Fichador Mochitos.
 
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="{setup_url}"
-                           style="background-color: #4CAF50; color: white; padding: 15px 30px;
-                                  text-decoration: none; border-radius: 5px; display: inline-block;
-                                  font-weight: bold;">
-                            🔑 Configurar mi contraseña
-                        </a>
-                    </div>
+Para activar tu cuenta, configura tu contraseña en el siguiente enlace:
+{setup_url}
 
-                    <p style="color: #666; font-size: 14px;">
-                        ⏰ Este enlace es válido por 24 horas.<br>
-                        📧 Tu email de acceso: <strong>{user.email}</strong>
-                    </p>
+Este enlace es válido por 24 horas.
+Tu email de acceso: {user.email}
 
-                    <p style="color: #999; font-size: 12px; margin-top: 30px; border-top: 1px solid #eee; padding-top: 15px;">
-                        Si no solicitaste esta cuenta, puedes ignorar este correo.
-                    </p>
-                </div>
-            </body>
-        </html>
-        '''
+Si no solicitaste esta cuenta, ignora este correo.
+'''
     )
 
     try:
-        mail.send(msg)
-        print(f"✅ Correo enviado exitosamente a {user.email}")
+        # Enviar de forma asíncrona
+        Thread(target=send_async_email, args=(app._get_current_object(), msg)).start()
         return True
     except Exception as e:
-        print(f"❌ Error al enviar correo a {user.email}")
-        print(f"Tipo de error: {type(e).__name__}")
-        print(f"Detalles del error: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ Error: {e}")
         return False
 
 @app.context_processor
@@ -727,7 +716,7 @@ def init_db():
         if not User.query.filter_by(email='christianconhr@gmail.com').first():
             admin = User(
                 email='christianconhr@gmail.com',
-                password=generate_password_hash('Lionelmesi10_'),
+                password=generate_password_hash('Lionelmesi10'),
                 name='Christian',
                 is_admin=True,
                 is_first_login=False,
