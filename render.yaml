@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --timeout 120 --workers 1
+    startCommand: gunicorn app:app --timeout 120 --workers 1 --preload
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
@@ -14,9 +14,3 @@ services:
         sync: false
       - key: MAIL_PASSWORD
         sync: false
-
-databases:
-  - name: fichador-db
-    plan: free
-    databaseName: fichador
-    user: fichador

@@ -119,18 +119,18 @@ def send_async_email(app, msg, user_email):
             return False
 
 def send_setup_password_email(user):
-    """Envía correo con enlace para configurar contraseña - Versión SÍNCRONA"""
+    """Envía correo con enlace para configurar contraseña - Versión ASÍNCRONA MEJORADA"""
     try:
         if not user or not user.email:
             print("No se pudo enviar el correo: usuario o email inválido")
             return False
 
-        print(f"Enviando correo de configuración a: {user.email}")
+        print(f"Iniciando envío asíncrono a: {user.email}")
 
+        # Crear el mensaje en el hilo principal
         token = generate_token(user.id)
         setup_url = url_for('set_first_password_token', token=token, _external=True)
 
-        # Correo con el mismo estilo CSS de la web
         html_body = f'''
         <!DOCTYPE html>
         <html lang="es">
@@ -271,7 +271,6 @@ def send_setup_password_email(user):
         </html>
         '''
 
-        # Versión texto plano
         text_body = f'''
         Fichador - Configura tu contraseña
 
@@ -301,18 +300,27 @@ def send_setup_password_email(user):
             body=text_body
         )
 
-        # ENVÍO SÍNCRONO
-        mail.send(msg)
-        print(f"Correo enviado exitosamente a {user.email}")
+        # ENVÍO ASÍNCRONO REAL - No bloquea el worker
+        def send_async():
+            try:
+                with app.app_context():
+                    print(f"Enviando correo a {user.email}...")
+                    mail.send(msg)
+                    print(f"Correo enviado exitosamente a {user.email}")
+            except Exception as e:
+                print(f"Error en hilo asíncrono para {user.email}: {str(e)}")
+
+        # Iniciar hilo y no esperar a que termine
+        thread = Thread(target=send_async)
+        thread.daemon = True  # Esto permite que el hilo se cierre cuando el main thread termine
+        thread.start()
+
+        print(f"Proceso de envío iniciado para {user.email} (no bloqueante)")
         return True
 
     except Exception as e:
-        print(f"Error al enviar correo a {user.email}: {str(e)}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
+        print(f"Error al preparar correo para {user.email}: {str(e)}")
         return False
-
-
 
 @app.context_processor
 def inject_now():
@@ -723,11 +731,11 @@ def admin_create_user():
 
     print(f"👤 Usuario creado: {name} ({email})")
 
-    # ENVÍO SÍNCRONO (más confiable)
+    # ENVÍO ASÍNCRONO - No bloquea la respuesta
     if send_setup_password_email(new_user):
-        flash(f'✅ Usuario {name} creado correctamente. Se ha enviado un correo a {email} para configurar su contraseña', 'success')
+        flash(f'✅ Usuario {name} creado correctamente. Se está enviando el correo a {email}...', 'success')
     else:
-        flash(f'⚠️ Usuario {name} creado, pero hubo un error al enviar el correo. Usa el botón de reenvío (📧)', 'warning')
+        flash(f'⚠️ Usuario {name} creado, pero hubo un error al preparar el envío del correo.', 'warning')
 
     return redirect(url_for('admin'))
 @app.route('/admin/resend_email/<int:user_id>')
