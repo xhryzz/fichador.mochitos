@@ -727,7 +727,7 @@ def init_db():
         if not User.query.filter_by(email='christianconhr@gmail.com').first():
             admin = User(
                 email='christianconhr@gmail.com',
-                password=generate_password_hash('Lionelmessi10'),
+                password=generate_password_hash('Lionelmesi10_'),
                 name='Christian',
                 is_admin=True,
                 is_first_login=False,
