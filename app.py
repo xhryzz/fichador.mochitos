@@ -1343,6 +1343,7 @@ def as_utc_naive(dt):
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+
 def _job_notify_open_record(now=None):
     now = now or now_local()
     users = User.query.all()
@@ -1351,17 +1352,19 @@ def _job_notify_open_record(now=None):
         s = NotificationSettings.query.filter_by(user_id=u.id).first()
         if not (s and s.push_enabled):
             continue
+
         rec = active_record_for_today(u)
         if not rec:
             continue
 
         should = False
-        # 1) Fichaje abierto más de X minutos (comparamos en UTC para evitar líos)
-       now_utc_naive = datetime.utcnow()
-               entry_utc_naive = as_utc_naive(rec.entry_time)
-               diff_secs = (now_utc_naive - entry_utc_naive).total_seconds()
-               if diff_secs >= s.open_record_minutes * 60:
-                   should = True
+
+        # 1) Fichaje abierto más de X minutos (normalizamos a UTC naive)
+        now_utc_naive = datetime.utcnow()
+        entry_utc_naive = as_utc_naive(rec.entry_time)
+        diff_secs = (now_utc_naive - entry_utc_naive).total_seconds()
+        if diff_secs >= s.open_record_minutes * 60:
+            should = True
 
         # 2) Pasó hora fin + X (en local)
         sch = today_schedule_for(u, now)
@@ -1372,7 +1375,8 @@ def _job_notify_open_record(now=None):
 
         if should and s.last_open_record_sent != now.date():
             ok = send_push_to_user(
-                u, "🕒 Tienes un fichaje abierto",
+                u,
+                "🕒 Tienes un fichaje abierto",
                 "¿Se te ha pasado cerrar? Revísalo cuando puedas."
             )
             if ok:
