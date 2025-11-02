@@ -15,7 +15,8 @@
                 {% if active_record %}
                 <div class="alert alert-warning mt-3">
                     <h6>Sesión activa desde:</h6>
-                    <h4>{{ active_record.entry_time.strftime('%H:%M') }}</h4>
+                    <!-- ✅ local time -->
+                    <h4>{{ active_record.entry_time|localdt('%H:%M') }}</h4>
 
                     <!-- Mostrar ubicación y mapa -->
                     <div class="location-info">
@@ -74,10 +75,11 @@
                             <tbody>
                             {% for record in today_records %}
                             <tr class="{{ 'table-warning' if not record.exit_time }}">
-                                <td>{{ record.entry_time.strftime('%H:%M') }}</td>
+                                <!-- ✅ local time -->
+                                <td>{{ record.entry_time|localdt('%H:%M') }}</td>
                                 <td>
                                     {% if record.exit_time %}
-                                    {{ record.exit_time.strftime('%H:%M') }}
+                                    {{ record.exit_time|localdt('%H:%M') }}
                                     {% else %}
                                     <span class="badge bg-warning">En curso</span>
                                     {% endif %}
@@ -160,7 +162,8 @@
             <h6>Estado actual</h6>
             {% if active_record %}
             <span class="badge bg-success">De Prácticas</span>
-            <p class="small mt-1">Desde: {{ active_record.entry_time.strftime('%H:%M') }}</p>
+            <!-- ✅ local time -->
+            <p class="small mt-1">Desde: {{ active_record.entry_time|localdt('%H:%M') }}</p>
             {% else %}
             <span class="badge bg-secondary">Descansando</span>
             {% endif %}
@@ -199,15 +202,12 @@
 
 {% block scripts %}
 <script>
-    // Coordenadas fijas del trabajo (fallback)
+    // (tu JS igual que antes; sin cambios de zona horaria porque todo lo pintamos en el servidor)
     const WORK_LAT = 37.8766614;
     const WORK_LNG = -4.7831533;
     const WORK_LOCATION = "Córdoba Ecuestre";
-
-    // Variables globales
     let previewMap, currentMarker;
 
-    // Inicializar mapa con ubicación
     function initMap(lat, lng, location) {
         if (previewMap) previewMap.remove();
         previewMap = L.map('previewMap').setView([lat, lng], 16);
@@ -217,7 +217,6 @@
         currentMarker = L.marker([lat, lng]).addTo(previewMap).bindPopup(location).openPopup();
     }
 
-    // Inicializar mapa para registro activo
     function initActiveRecordMap(lat, lng) {
         const map = L.map('activeRecordMap').setView([lat, lng], 16);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -226,7 +225,6 @@
         L.marker([lat, lng]).addTo(map).bindPopup('Ubicación del fichaje').openPopup();
     }
 
-    // Mostrar mapa de registro histórico (modal)
     function showRecordMap(lat, lng, location) {
         document.getElementById('modalLocationText').textContent = location;
         const mapContainer = document.getElementById('recordMap');
@@ -243,7 +241,6 @@
         }, 100);
     }
 
-    // Nominatim
     async function getAddressFromCoords(lat, lng) {
         try {
             const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16`);
@@ -255,7 +252,6 @@
         }
     }
 
-    // Navegador
     function getLocationByBrowser() {
         return new Promise((resolve, reject) => {
             if (!navigator.geolocation) return reject("Geolocalización no soportada");
@@ -267,7 +263,6 @@
         });
     }
 
-    // Híbrida
     async function detectLocation() {
         const statusElement = document.getElementById('locationStatus');
         try {
@@ -305,7 +300,6 @@
         {% endif %}
     });
 
-    // clock in/out
     document.getElementById('clockInForm')?.addEventListener('submit', async function(e) {
         e.preventDefault();
         const btn = this.querySelector('button[type="submit"]');
