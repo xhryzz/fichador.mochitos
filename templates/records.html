@@ -21,7 +21,7 @@
                                 <th>Horas</th>
                                 <th>Ubicación</th>
                                 <th>Estado</th>
-                            </tr>
+                            <th>Acciones</th></tr>
                         </thead>
                         <tbody>
                             {% for record in records.items %}
@@ -61,7 +61,12 @@
                                         <span class="badge bg-warning">Activo</span>
                                     {% endif %}
                                 </td>
-                            </tr>
+                            <td>
+  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('user_edit_record', record_id=record.id) }}">Editar</a>
+  <form method="POST" action="{{ url_for('user_delete_record', record_id=record.id) }}" style="display:inline" onsubmit="return confirm('¿Eliminar este fichaje?')">
+    <button class="btn btn-sm btn-outline-danger" type="submit">Eliminar</button>
+  </form>
+</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>

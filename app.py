@@ -536,6 +536,110 @@ def records():
     records = TimeRecord.query.filter_by(user_id=current_user.id).order_by(TimeRecord.date.desc(), TimeRecord.entry_time.desc()).paginate(page=page, per_page=10)
     return render_template('records.html', records=records)
 
+
+# =============================
+# CRUD de fichajes para usuario
+# =============================
+@app.route('/records/new', methods=['GET', 'POST'])
+@login_required
+def user_add_record():
+    if request.method == 'POST':
+        try:
+            date = datetime.strptime(request.form.get('date'), '%Y-%m-%d').date()
+            entry_time = datetime.strptime(request.form.get('entry_time'), '%H:%M').time()
+            exit_time_str = request.form.get('exit_time')
+            exit_time = datetime.strptime(exit_time_str, '%H:%M').time() if exit_time_str else None
+
+            if exit_time and datetime.combine(date, exit_time) < datetime.combine(date, entry_time):
+                flash('La salida no puede ser anterior a la entrada', 'error')
+                return redirect(url_for('user_add_record'))
+
+            latitude = float(request.form.get('latitude')) if request.form.get('latitude') else None
+            longitude = float(request.form.get('longitude')) if request.form.get('longitude') else None
+
+            record = TimeRecord(
+                user_id=current_user.id,
+                date=date,
+                entry_time=datetime.combine(date, entry_time),
+                exit_time=datetime.combine(date, exit_time) if exit_time else None,
+                location=request.form.get('location', ''),
+                latitude=latitude,
+                longitude=longitude,
+                notes=request.form.get('notes', '')
+            )
+            db.session.add(record)
+            db.session.commit()
+            flash('Fichaje creado correctamente', 'success')
+            return redirect(url_for('records'))
+        except Exception as e:
+            db.session.rollback()
+            print('Error al crear fichaje:', e)
+            flash('Error al crear el fichaje', 'error')
+            return redirect(url_for('user_add_record'))
+    return render_template('user_new_record.html')
+
+@app.route('/records/edit/<int:record_id>', methods=['GET', 'POST'])
+@login_required
+def user_edit_record(record_id):
+    record = TimeRecord.query.get_or_404(record_id)
+    if record.user_id != current_user.id:
+        flash('No tienes permisos para editar este fichaje', 'error')
+        return redirect(url_for('records'))
+
+    if request.method == 'POST':
+        try:
+            entry_time_str = request.form.get('entry_time')
+            exit_time_str = request.form.get('exit_time')
+            if entry_time_str:
+                record.entry_time = datetime.strptime(f"{record.date} {entry_time_str}", '%Y-%m-%d %H:%M')
+            if exit_time_str:
+                record.exit_time = datetime.strptime(f"{record.date} {exit_time_str}", '%Y-%m-%d %H:%M')
+            else:
+                record.exit_time = None
+
+            # Validación entrada/salida
+            if record.exit_time and record.exit_time < record.entry_time:
+                flash('La salida no puede ser anterior a la entrada', 'error')
+                return redirect(url_for('user_edit_record', record_id=record.id))
+
+            if request.form.get('latitude'):
+                record.latitude = float(request.form.get('latitude'))
+            if request.form.get('longitude'):
+                record.longitude = float(request.form.get('longitude'))
+            record.location = request.form.get('location', '')
+            record.notes = request.form.get('notes', '')
+            db.session.commit()
+            flash('Fichaje actualizado correctamente', 'success')
+            return redirect(url_for('records'))
+        except Exception as e:
+            db.session.rollback()
+            print('Error al actualizar fichaje:', e)
+            flash('Error al actualizar el fichaje', 'error')
+            return redirect(url_for('user_edit_record', record_id=record.id))
+
+    # Pasamos horas para prefijar el form
+    entry_prefill = record.entry_time.strftime('%H:%M') if record.entry_time else ''
+    exit_prefill = record.exit_time.strftime('%H:%M') if record.exit_time else ''
+    return render_template('user_edit_record.html', record=record, entry_prefill=entry_prefill, exit_prefill=exit_prefill)
+
+@app.route('/records/delete/<int:record_id>', methods=['POST'])
+@login_required
+def user_delete_record(record_id):
+    record = TimeRecord.query.get_or_404(record_id)
+    if record.user_id != current_user.id:
+        flash('No tienes permisos para eliminar este fichaje', 'error')
+        return redirect(url_for('records'))
+    try:
+        db.session.delete(record)
+        db.session.commit()
+        flash('Fichaje eliminado correctamente', 'success')
+    except Exception as e:
+        db.session.rollback()
+        print('Error al eliminar fichaje:', e)
+        flash('Error al eliminar el fichaje', 'error')
+    return redirect(url_for('records'))
+
+
 @app.route('/reports')
 @login_required
 def reports():
