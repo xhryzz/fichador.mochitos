@@ -1,113 +1,103 @@
-const CACHE_NAME = 'fichador-v1';
-const urlsToCache = [
-  '/',
+// Minimal, safe service worker for PWA + Push
+// Bump version to force update
+const CACHE_NAME = 'fichador-cache-v2.0.0';
+
+// Cache ONLY immutable/static assets that actually exist
+const ASSETS = [
   '/static/css/style.css',
-  '/static/js/app.js',
-  '/dashboard',
-  '/schedule',
-  '/records'
+  '/static/css/style.min.css',
+  '/static/js/notifications.js',
+  '/static/icon-128x128.png',
+  '/static/icon-144x144.png',
+  '/static/icon-180x180.png',
+  '/static/icon-192x192.png',
+  '/manifest.json'
 ];
 
-// Instalación del Service Worker
-self.addEventListener('install', event => {
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(urlsToCache))
-  );
-});
-
-// Activación y limpieza de cachés antiguas
-self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cacheName => {
-          if (cacheName !== CACHE_NAME) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(ASSETS).catch((err) => {
+        // If any single asset fails, don't abort the entire install.
+        console.error('[SW] Cache.addAll error (continuing):', err);
+      });
     })
   );
 });
 
-// Estrategia de caché: Network First, falling back to cache
-self.addEventListener('fetch', event => {
-  event.respondWith(
-    fetch(event.request)
-      .then(response => {
-        // Clonar la respuesta
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME)
-          .then(cache => {
-            cache.put(event.request, responseToCache);
-          });
-        return response;
-      })
-      .catch(() => {
-        return caches.match(event.request);
-      })
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => (k !== CACHE_NAME ? caches.delete(k) : Promise.resolve())));
+      await self.clients.claim();
+    })()
   );
 });
 
-// Escuchar mensajes para programar notificaciones
-self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'SCHEDULE_NOTIFICATION') {
-    const { title, body, delay, tag } = event.data;
-    
-    setTimeout(() => {
-      self.registration.showNotification(title, {
-        body: body,
-        icon: '/static/icon-192x192.png',
-        badge: '/static/badge-72x72.png',
-        tag: tag,
-        requireInteraction: true,
-        vibrate: [200, 100, 200],
-        actions: [
-          { action: 'fichar', title: 'Fichar ahora' },
-          { action: 'close', title: 'Cerrar' }
-        ]
-      });
-    }, delay);
-  }
-});
+// Cache-first for static files; network-first for HTML navigations and API
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  const url = new URL(req.url);
 
-// Manejar clicks en las notificaciones
-self.addEventListener('notificationclick', event => {
-  event.notification.close();
-  
-  if (event.action === 'fichar') {
-    event.waitUntil(
-      clients.openWindow('/dashboard')
+  // Only handle GET
+  if (req.method !== 'GET') return;
+
+  // For same-origin static assets (css/js/images/fonts), use cache-first
+  const dest = req.destination;
+  const isStatic = ['style', 'script', 'image', 'font'].includes(dest);
+  if (url.origin === location.origin && isStatic) {
+    event.respondWith(
+      caches.match(req).then((cached) => {
+        return cached || fetch(req).then((resp) => {
+          const respClone = resp.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(req, respClone));
+          return resp;
+        }).catch(() => cached);
+      })
     );
+    return;
+  }
+
+  // For navigations (HTML) and API calls, prefer network
+  if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
+    event.respondWith(
+      fetch(req).catch(() => caches.match('/'))
+    );
+    return;
   }
 });
 
-
-// Escuchar eventos push
+// Handle push events
 self.addEventListener('push', (event) => {
-    let data = {};
-    try { data = event.data ? event.data.json() : {}; } catch(e) {}
-
+  try {
+    const data = event.data ? event.data.json() : {};
     const title = data.title || 'Notificación';
     const options = {
-        body: data.body || '',
-        icon: data.icon || '/static/icon-192x192.png',
-        badge: data.badge || '/static/icon-72x72.png',
-        data: data.data || {},
-        actions: data.actions || [{action:'fichar', title:'Abrir fichador'}]
+      body: data.body || '',
+      icon: data.icon || '/static/icon-192x192.png',
+      badge: data.badge || '/static/icon-128x128.png',
+      data: data.data || {},
+      actions: data.actions || []
     };
-
     event.waitUntil(self.registration.showNotification(title, options));
+  } catch (e) {
+    // Fallback if body is not JSON
+    event.waitUntil(self.registration.showNotification('Notificación', { body: event.data && event.data.text() }));
+  }
 });
 
 self.addEventListener('notificationclick', (event) => {
-    event.notification.close();
-    const url = '/dashboard';
-    event.waitUntil(clients.matchAll({ type: 'window' }).then(windowClients => {
-        for (const client of windowClients) {
-            if (client.url.includes(url) && 'focus' in client) return client.focus();
-        }
-        if (clients.openWindow) return clients.openWindow(url);
-    }));
+  event.notification.close();
+  const targetUrl = '/dashboard';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientsArr) => {
+      const hadWindow = clientsArr.some((w) => {
+        if (w.url.includes(targetUrl)) { w.focus(); return true; }
+        return false;
+      });
+      if (!hadWindow) return self.clients.openWindow(targetUrl);
+    })
+  );
 });
