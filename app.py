@@ -4,75 +4,89 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 from itsdangerous import URLSafeTimedSerializer
+import json
 import csv
 import io
 import os
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
+import resend
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
+from reportlab.lib import colors
+from reportlab.lib.units import cm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+
 
 app = Flask(__name__)
 
-# ============================
-# Configuración
-# ============================
+# Configuración adaptada para producción (Render) y desarrollo local
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'tu-clave-secreta-aqui-cambiar-en-produccion')
 
-# Base de datos: PostgreSQL (Render) o SQLite (local)
+# Base de datos: PostgreSQL en producción (Render), SQLite en desarrollo
 if os.environ.get('DATABASE_URL'):
+    # Render proporciona DATABASE_URL para PostgreSQL
     database_url = os.environ.get('DATABASE_URL')
+    # Fix para SQLAlchemy 1.4+ (Render usa postgres://, pero SQLAlchemy necesita postgresql://)
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 else:
+    # Desarrollo local con SQLite
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///fichador.db'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# Serializer para tokens
+# Serializer para generar tokens seguros
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
-# ============================
-# Filtros / Helpers duración
-# ============================
-@app.template_filter('minutes')
-def _fmt_minutes(total_seconds):
+# ============================================
+# Formato de horas -> "X h Y min" para toda la app
+# ============================================
+def format_hours_to_hm(hours_value):
+    """Convierte horas (float) a el formato 'X h Y min'. Acepta negativos."""
+    if hours_value is None:
+        return "-"
     try:
-        secs = float(total_seconds)
-    except (TypeError, ValueError):
-        return 0
-    return int(secs // 60)
+        val = float(hours_value)
+    except Exception:
+        return str(hours_value)
+    sign = "-" if val < 0 else ""
+    total_minutes = int(round(abs(val) * 60))
+    h = total_minutes // 60
+    m = total_minutes % 60
+    return f"{sign}{h} h {m} min"
 
-@app.template_filter('hhmm')
-def _fmt_hhmm(total_seconds):
+def format_seconds_to_hm(total_seconds):
+    """Convierte segundos (int/float) al formato 'X h Y min'."""
+    if total_seconds is None:
+        return "-"
     try:
-        secs = float(total_seconds)
-    except (TypeError, ValueError):
-        return "0 h 00 min"
-    mins = int(secs // 60)
-    h = mins // 60
-    m = mins % 60
-    return f"{h} h {m:02d} min"
+        secs = int(round(float(total_seconds)))
+    except Exception:
+        return str(total_seconds)
+    sign = "-" if secs < 0 else ""
+    secs = abs(secs)
+    total_minutes = secs // 60
+    h = total_minutes // 60
+    m = total_minutes % 60
+    return f"{sign}{h} h {m} min"
 
-def format_hhmm(total_seconds: float) -> str:
-    try:
-        secs = float(total_seconds)
-    except (TypeError, ValueError):
-        return "0 h 00 min"
-    mins = int(secs // 60)
-    h = mins // 60
-    m = mins % 60
-    return f"{h} h {m:02d} min"
+# Filtro Jinja: {{ horas | hm }} -> 'X h Y min'
+@app.template_filter('hm')
+def jinja_hm_filter(hours_value):
+    return format_hours_to_hm(hours_value)
 
-# ============================
+
 # Modelos
-# ============================
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(100), unique=True, nullable=False)
@@ -87,7 +101,7 @@ class User(UserMixin, db.Model):
 class Schedule(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    day_of_week = db.Column(db.Integer, nullable=False)  # 0=Lunes ... 6=Domingo
+    day_of_week = db.Column(db.Integer, nullable=False)
     start_time = db.Column(db.Time, nullable=False)
     end_time = db.Column(db.Time, nullable=False)
     hours_required = db.Column(db.Float, nullable=False)
@@ -109,25 +123,35 @@ class TimeRecord(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# ============================
-# Email (SendGrid)
-# ============================
+# ============================================
+# FUNCIONES DE CORREO CON RESEND
+# ============================================
+
 def generate_token(user_id):
+    """Genera un token seguro para el usuario"""
     return serializer.dumps(user_id, salt='password-setup-salt')
 
 def verify_token(token, expiration=86400):
+    """Verifica el token (válido por 24 horas por defecto)"""
     try:
         user_id = serializer.loads(token, salt='password-setup-salt', max_age=expiration)
         return user_id
-    except Exception:
+    except:
         return None
+
+@app.template_filter('hm_seconds')
+def jinja_hm_seconds_filter(seconds_value):
+    return format_seconds_to_hm(seconds_value)
+
+
+import os
 
 def send_setup_password_email(user):
     """
-    Envía el correo con enlace para configurar contraseña usando SendGrid.
-    Requiere:
-      - SENDGRID_API_KEY
-      - FROM_EMAIL  (remitente verificado en SendGrid)
+    Envía el correo con enlace para configurar contraseña usando SendGrid API.
+    Requiere variables de entorno:
+      - SENDGRID_API_KEY  -> tu API Key de SendGrid
+      - FROM_EMAIL        -> el remitente verificado en SendGrid (Single Sender o dominio autenticado)
     """
     try:
         if not user or not user.email:
@@ -140,7 +164,7 @@ def send_setup_password_email(user):
             print("❌ Falta SENDGRID_API_KEY en env vars")
             return False
         if not from_email:
-            print("❌ Falta FROM_EMAIL en env vars")
+            print("❌ Falta FROM_EMAIL en env vars (debe coincidir con el remitente verificado en SendGrid)")
             return False
 
         print(f"🚀 Enviando correo con SendGrid a: {user.email}")
@@ -148,6 +172,7 @@ def send_setup_password_email(user):
         token = generate_token(user.id)
         setup_url = url_for('set_first_password_token', token=token, _external=True)
 
+        # Texto plano
         text = f"""Fichador - Configura tu contraseña
 
 Hola {user.name},
@@ -169,33 +194,89 @@ Si no solicitaste esta cuenta, ignora este mensaje.
 Equipo Fichador
 """
 
+        # HTML (reutilizo tu diseño)
         html = f"""\
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Configura tu contraseña</title></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height:1.6; color:#333; max-width:600px; margin:0 auto; padding:20px;">
-  <div style="background:white;border-radius:12px;padding:40px;margin:20px 0;border:1px solid #e1e5e9;">
-    <div style="text-align:center;margin-bottom:30px;border-bottom:1px solid #e1e5e9;padding-bottom:20px;">
-      <div style="font-size:24px;font-weight:700;color:#007AFF;margin-bottom:8px;">Fichador</div>
-      <div style="font-size:20px;color:#1f2937;">Bienvenido, {user.name}</div>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configura tu contraseña</title>
+  <style>
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+    }}
+    .container {{
+      background: white;
+      border-radius: 12px;
+      padding: 40px;
+      margin: 20px 0;
+      border: 1px solid #e1e5e9;
+    }}
+    .header {{
+      text-align: center;
+      margin-bottom: 30px;
+      border-bottom: 1px solid #e1e5e9;
+      padding-bottom: 20px;
+    }}
+    .logo {{
+      font-size: 24px;
+      font-weight: 700;
+      color: #007AFF;
+      margin-bottom: 8px;
+    }}
+    .button {{
+      display: inline-block;
+      background: #007AFF;
+      color: white;
+      padding: 14px 32px;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 16px;
+      margin: 20px 0;
+    }}
+    .alert {{
+      background: #eff6ff;
+      border: 1px solid #3b82f6;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 20px 0;
+    }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">Fichador</div>
+      <div style="font-size: 20px; color: #1f2937;">Bienvenido, {user.name}</div>
     </div>
     <p>Se ha creado una cuenta para ti en Fichador. Para comenzar a usar la plataforma, configura tu contraseña.</p>
-    <div style="text-align:center;">
-      <a href="{setup_url}" style="display:inline-block;background:#007AFF;color:#fff;padding:14px 32px;text-decoration:none;border-radius:8px;font-weight:600;font-size:16px;margin:20px 0;">Configurar Contraseña</a>
+    <div style="text-align: center;">
+      <a href="{setup_url}" class="button">Configurar Contraseña</a>
     </div>
-    <div style="background:#eff6ff;border:1px solid #3b82f6;border-radius:8px;padding:16px;margin:20px 0;">
+    <div class="alert">
       <strong>⚠️ Importante:</strong> Este enlace es válido por 24 horas.
     </div>
-    <div style="background:#f8fafc;padding:20px;border-radius:8px;">
+    <div style="background: #f8fafc; padding: 20px; border-radius: 8px;">
       <div><strong>📧 Email:</strong> {user.email}</div>
       <div><strong>⏰ Horas requeridas:</strong> {user.total_hours_required} horas</div>
     </div>
-    <div style="text-align:center;margin-top:30px;color:#6b7280;">Equipo Fichador</div>
+    <div style="text-align: center; margin-top: 30px; color: #6b7280;">
+      <p>Equipo Fichador</p>
+    </div>
   </div>
-</body></html>
+</body>
+</html>
 """
 
         message = Mail(
-            from_email=from_email,
+            from_email=from_email,       # ← Debe ser el remitente verificado (Single Sender o dominio)
             to_emails=user.email,
             subject="Configura tu contraseña - Fichador",
             plain_text_content=text,
@@ -217,9 +298,7 @@ Equipo Fichador
 def inject_now():
     return {'now': datetime.now()}
 
-# ============================
 # Rutas principales
-# ============================
 @app.route('/')
 def index():
     if current_user.is_authenticated:
@@ -248,10 +327,13 @@ def login():
 
 @app.route('/setup-password/<token>', methods=['GET', 'POST'])
 def set_first_password_token(token):
+    """Nueva ruta con token seguro para configurar contraseña"""
     user_id = verify_token(token)
+
     if not user_id:
         flash('❌ El enlace ha expirado o no es válido. Solicita uno nuevo al administrador', 'error')
         return redirect(url_for('login'))
+
     user = User.query.get_or_404(user_id)
 
     if not user.is_first_login or user.password:
@@ -337,19 +419,12 @@ def dashboard():
     active_record = next((record for record in today_records if not record.exit_time), None)
 
     week_start = today - timedelta(days=today.weekday())
-    week_records = TimeRecord.query.filter(
-        TimeRecord.user_id == current_user.id,
-        TimeRecord.date >= week_start,
-        TimeRecord.exit_time.isnot(None)
-    ).all()
-    weekly_hours = sum((r.exit_time - r.entry_time).total_seconds() / 3600 for r in week_records)
-    today_hours = sum((r.exit_time - r.entry_time).total_seconds() / 3600 for r in today_records if r.exit_time)
+    week_records = TimeRecord.query.filter(TimeRecord.user_id == current_user.id, TimeRecord.date >= week_start, TimeRecord.exit_time.isnot(None)).all()
+    weekly_hours = sum((record.exit_time - record.entry_time).total_seconds() / 3600 for record in week_records)
+    today_hours = sum((record.exit_time - record.entry_time).total_seconds() / 3600 for record in today_records if record.exit_time)
 
-    all_records = TimeRecord.query.filter(
-        TimeRecord.user_id == current_user.id,
-        TimeRecord.exit_time.isnot(None)
-    ).all()
-    total_hours_worked = sum((r.exit_time - r.entry_time).total_seconds() / 3600 for r in all_records)
+    all_records = TimeRecord.query.filter(TimeRecord.user_id == current_user.id, TimeRecord.exit_time.isnot(None)).all()
+    total_hours_worked = sum((record.exit_time - record.entry_time).total_seconds() / 3600 for record in all_records)
 
     schedules = Schedule.query.filter_by(user_id=current_user.id, is_active=True).all()
     weekly_required_hours = 0
@@ -362,35 +437,14 @@ def dashboard():
 
     total_hours_required = current_user.total_hours_required
 
-    # Minutos para mostrar en hh:mm sin decimales
-    weekly_minutes = int(sum((rec.exit_time - rec.entry_time).total_seconds() for rec in week_records) // 60) if week_records else 0
-    today_minutes = int(sum((rec.exit_time - rec.entry_time).total_seconds() for rec in today_records if rec.exit_time) // 60) if today_records else 0
-    total_minutes_worked = int(sum((rec.exit_time - rec.entry_time).total_seconds() for rec in all_records) // 60) if all_records else 0
-    weekly_required_minutes = int(weekly_required_hours * 60)
-    total_required_minutes = int(total_hours_required * 60)
-    remaining_total_minutes = max(total_required_minutes - total_minutes_worked, 0)
-
-    return render_template(
-        'dashboard.html',
-        active_record=active_record,
-        today_records=today_records,
-        weekly_hours=weekly_hours,
-        today_hours=today_hours,
-        weekly_required_hours=weekly_required_hours,
-        total_hours_worked=total_hours_worked,
-        total_hours_required=total_hours_required,
-        weekly_minutes=weekly_minutes,
-        today_minutes=today_minutes,
-        total_minutes_worked=total_minutes_worked,
-        weekly_required_minutes=weekly_required_minutes,
-        total_required_minutes=total_required_minutes,
-        remaining_total_minutes=remaining_total_minutes
-    )
+    return render_template('dashboard.html', active_record=active_record, today_records=today_records,
+                         weekly_hours=weekly_hours, today_hours=today_hours, weekly_required_hours=weekly_required_hours,
+                         total_hours_worked=total_hours_worked, total_hours_required=total_hours_required)
 
 @app.route('/clock_in', methods=['POST'])
 @login_required
 def clock_in():
-    location = request.form.get('location', 'Lugar de trabajo')
+    location = request.form.get('location', 'Córdoba Ecuestre')
     latitude = request.form.get('latitude', type=float, default=37.8766614)
     longitude = request.form.get('longitude', type=float, default=-4.7831533)
     today = datetime.now().date()
@@ -400,15 +454,7 @@ def clock_in():
         flash('Ya tienes una sesión activa. Debes cerrarla antes de iniciar otra.', 'error')
         return redirect(url_for('dashboard'))
 
-    new_record = TimeRecord(
-        user_id=current_user.id,
-        date=today,
-        entry_time=datetime.now(),
-        location=location,
-        latitude=latitude,
-        longitude=longitude,
-        is_active=True
-    )
+    new_record = TimeRecord(user_id=current_user.id, date=today, entry_time=datetime.now(), location=location, latitude=latitude, longitude=longitude, is_active=True)
     db.session.add(new_record)
     db.session.commit()
     flash('Entrada registrada correctamente', 'success')
@@ -424,7 +470,7 @@ def clock_out():
         flash('No hay una sesión activa para cerrar', 'error')
         return redirect(url_for('dashboard'))
 
-    location = request.form.get('location', 'Lugar de trabajo')
+    location = request.form.get('location', 'Córdoba Ecuestre')
     if location != active_record.location:
         active_record.location = f"{active_record.location} | Salida: {location}"
 
@@ -432,14 +478,216 @@ def clock_out():
     active_record.is_active = False
     db.session.commit()
 
-    # Duración de la sesión cerrada
-    session_seconds = (active_record.exit_time - active_record.entry_time).total_seconds()
-    flash(f'Fichaje cerrado: {format_hhmm(session_seconds)}', 'success')
+    session_hours = (active_record.exit_time - active_record.entry_time).total_seconds() / 3600
+    flash(f'Salida registrada correctamente. Sesión: {session_hours:.2f} horas', 'success')
     return redirect(url_for('dashboard'))
 
-# ============================
-# REPORTES
-# ============================
+@app.route('/schedule')
+@login_required
+def schedule():
+    schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.day_of_week).all()
+    schedules_by_day = {s.day_of_week: s for s in schedules}
+    days_of_week = [(0, 'Lunes'), (1, 'Martes'), (2, 'Miércoles'), (3, 'Jueves'), (4, 'Viernes'), (5, 'Sábado'), (6, 'Domingo')]
+    return render_template('schedule.html', schedules_by_day=schedules_by_day, days_of_week=days_of_week)
+
+@app.route('/schedule/add', methods=['POST'])
+@login_required
+def add_schedule():
+    day_of_week = int(request.form.get('day_of_week'))
+    start_time = datetime.strptime(request.form.get('start_time'), '%H:%M').time()
+    end_time = datetime.strptime(request.form.get('end_time'), '%H:%M').time()
+    is_active = request.form.get('is_active') == 'on'
+    hours_required = (datetime.combine(datetime.min, end_time) - datetime.combine(datetime.min, start_time)).seconds / 3600
+
+    existing = Schedule.query.filter_by(user_id=current_user.id, day_of_week=day_of_week).first()
+    if existing:
+        existing.start_time = start_time
+        existing.end_time = end_time
+        existing.hours_required = hours_required
+        existing.is_active = is_active
+        flash('Horario actualizado correctamente', 'success')
+    else:
+        schedule = Schedule(user_id=current_user.id, day_of_week=day_of_week, start_time=start_time, end_time=end_time, hours_required=hours_required, is_active=is_active)
+        db.session.add(schedule)
+        flash('Horario añadido correctamente', 'success')
+
+    db.session.commit()
+    return redirect(url_for('schedule'))
+
+@app.route('/schedule/toggle/<int:id>')
+@login_required
+def toggle_schedule(id):
+    schedule = Schedule.query.get_or_404(id)
+    if schedule.user_id != current_user.id:
+        flash('No tienes permisos para modificar este horario', 'error')
+        return redirect(url_for('schedule'))
+    schedule.is_active = not schedule.is_active
+    db.session.commit()
+    flash(f'Horario {"activado" if schedule.is_active else "desactivado"} correctamente', 'success')
+    return redirect(url_for('schedule'))
+
+@app.route('/schedule/delete/<int:id>')
+@login_required
+def delete_schedule(id):
+    schedule = Schedule.query.get_or_404(id)
+    if schedule.user_id != current_user.id:
+        flash('No tienes permisos para eliminar este horario', 'error')
+        return redirect(url_for('schedule'))
+    db.session.delete(schedule)
+    db.session.commit()
+    flash('Horario eliminado correctamente', 'success')
+    return redirect(url_for('schedule'))
+
+@app.route('/schedule/copy_week', methods=['POST'])
+@login_required
+def copy_week():
+    source_day = int(request.form.get('source_day'))
+    target_days = request.form.getlist('target_days[]')
+    source_schedule = Schedule.query.filter_by(user_id=current_user.id, day_of_week=source_day).first()
+
+    if not source_schedule:
+        flash('No hay horario configurado para el día seleccionado', 'error')
+        return redirect(url_for('schedule'))
+
+    for day in target_days:
+        day = int(day)
+        if day == source_day:
+            continue
+        existing = Schedule.query.filter_by(user_id=current_user.id, day_of_week=day).first()
+        if existing:
+            existing.start_time = source_schedule.start_time
+            existing.end_time = source_schedule.end_time
+            existing.hours_required = source_schedule.hours_required
+            existing.is_active = source_schedule.is_active
+        else:
+            new_schedule = Schedule(user_id=current_user.id, day_of_week=day, start_time=source_schedule.start_time,
+                                   end_time=source_schedule.end_time, hours_required=source_schedule.hours_required, is_active=source_schedule.is_active)
+            db.session.add(new_schedule)
+
+    db.session.commit()
+    flash('Horarios copiados correctamente', 'success')
+    return redirect(url_for('schedule'))
+
+@app.route('/schedule/update_total_hours', methods=['POST'])
+@login_required
+def update_total_hours():
+    total_hours = float(request.form.get('total_hours', 150))
+    current_user.total_hours_required = total_hours
+    db.session.commit()
+    flash('Horas totales actualizadas correctamente', 'success')
+    return redirect(url_for('schedule'))
+
+@app.route('/records')
+@login_required
+def records():
+    page = request.args.get('page', 1, type=int)
+    records = TimeRecord.query.filter_by(user_id=current_user.id).order_by(TimeRecord.date.desc(), TimeRecord.entry_time.desc()).paginate(page=page, per_page=10)
+    return render_template('records.html', records=records)
+
+
+# =============================
+# CRUD de fichajes para usuario
+# =============================
+@app.route('/records/new', methods=['GET', 'POST'])
+@login_required
+def user_add_record():
+    if request.method == 'POST':
+        try:
+            date = datetime.strptime(request.form.get('date'), '%Y-%m-%d').date()
+            entry_time = datetime.strptime(request.form.get('entry_time'), '%H:%M').time()
+            exit_time_str = request.form.get('exit_time')
+            exit_time = datetime.strptime(exit_time_str, '%H:%M').time() if exit_time_str else None
+
+            if exit_time and datetime.combine(date, exit_time) < datetime.combine(date, entry_time):
+                flash('La salida no puede ser anterior a la entrada', 'error')
+                return redirect(url_for('user_add_record'))
+
+            latitude = float(request.form.get('latitude')) if request.form.get('latitude') else None
+            longitude = float(request.form.get('longitude')) if request.form.get('longitude') else None
+
+            record = TimeRecord(
+                user_id=current_user.id,
+                date=date,
+                entry_time=datetime.combine(date, entry_time),
+                exit_time=datetime.combine(date, exit_time) if exit_time else None,
+                location=request.form.get('location', ''),
+                latitude=latitude,
+                longitude=longitude,
+                notes=request.form.get('notes', '')
+            )
+            db.session.add(record)
+            db.session.commit()
+            flash('Fichaje creado correctamente', 'success')
+            return redirect(url_for('records'))
+        except Exception as e:
+            db.session.rollback()
+            print('Error al crear fichaje:', e)
+            flash('Error al crear el fichaje', 'error')
+            return redirect(url_for('user_add_record'))
+    return render_template('user_new_record.html')
+
+@app.route('/records/edit/<int:record_id>', methods=['GET', 'POST'])
+@login_required
+def user_edit_record(record_id):
+    record = TimeRecord.query.get_or_404(record_id)
+    if record.user_id != current_user.id:
+        flash('No tienes permisos para editar este fichaje', 'error')
+        return redirect(url_for('records'))
+
+    if request.method == 'POST':
+        try:
+            entry_time_str = request.form.get('entry_time')
+            exit_time_str = request.form.get('exit_time')
+            if entry_time_str:
+                record.entry_time = datetime.strptime(f"{record.date} {entry_time_str}", '%Y-%m-%d %H:%M')
+            if exit_time_str:
+                record.exit_time = datetime.strptime(f"{record.date} {exit_time_str}", '%Y-%m-%d %H:%M')
+            else:
+                record.exit_time = None
+
+            # Validación entrada/salida
+            if record.exit_time and record.exit_time < record.entry_time:
+                flash('La salida no puede ser anterior a la entrada', 'error')
+                return redirect(url_for('user_edit_record', record_id=record.id))
+
+            if request.form.get('latitude'):
+                record.latitude = float(request.form.get('latitude'))
+            if request.form.get('longitude'):
+                record.longitude = float(request.form.get('longitude'))
+            record.location = request.form.get('location', '')
+            record.notes = request.form.get('notes', '')
+            db.session.commit()
+            flash('Fichaje actualizado correctamente', 'success')
+            return redirect(url_for('records'))
+        except Exception as e:
+            db.session.rollback()
+            print('Error al actualizar fichaje:', e)
+            flash('Error al actualizar el fichaje', 'error')
+            return redirect(url_for('user_edit_record', record_id=record.id))
+
+    # Pasamos horas para prefijar el form
+    entry_prefill = record.entry_time.strftime('%H:%M') if record.entry_time else ''
+    exit_prefill = record.exit_time.strftime('%H:%M') if record.exit_time else ''
+    return render_template('user_edit_record.html', record=record, entry_prefill=entry_prefill, exit_prefill=exit_prefill)
+
+@app.route('/records/delete/<int:record_id>', methods=['POST'])
+@login_required
+def user_delete_record(record_id):
+    record = TimeRecord.query.get_or_404(record_id)
+    if record.user_id != current_user.id:
+        flash('No tienes permisos para eliminar este fichaje', 'error')
+        return redirect(url_for('records'))
+    try:
+        db.session.delete(record)
+        db.session.commit()
+        flash('Fichaje eliminado correctamente', 'success')
+    except Exception as e:
+        db.session.rollback()
+        print('Error al eliminar fichaje:', e)
+        flash('Error al eliminar el fichaje', 'error')
+    return redirect(url_for('records'))
+
+
 @app.route('/reports')
 @login_required
 def reports():
@@ -452,11 +700,7 @@ def generate_report():
     end_date = datetime.strptime(request.form.get('end_date'), '%Y-%m-%d').date()
     report_type = request.form.get('report_type')
 
-    records = TimeRecord.query.filter(
-        TimeRecord.user_id == current_user.id,
-        TimeRecord.date >= start_date,
-        TimeRecord.date <= end_date
-    ).order_by(TimeRecord.date, TimeRecord.entry_time).all()
+    records = TimeRecord.query.filter(TimeRecord.user_id == current_user.id, TimeRecord.date >= start_date, TimeRecord.date <= end_date).order_by(TimeRecord.date, TimeRecord.entry_time).all()
 
     if report_type == 'csv':
         return generate_csv_report(records, start_date, end_date)
@@ -469,70 +713,216 @@ def generate_report():
 def generate_csv_report(records, start_date, end_date):
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Fecha', 'Entrada', 'Salida', 'Duración (hh:mm)', 'Minutos', 'Ubicación', 'Coordenadas'])
+    writer.writerow(['Fecha', 'Entrada', 'Salida', 'Duración', 'Ubicación', 'Coordenadas'])
     for record in records:
-        if record.exit_time:
-            secs = (record.exit_time - record.entry_time).total_seconds()
-            dur_hhmm = format_hhmm(secs)
-            mins = int(secs // 60)
-        else:
-            dur_hhmm = ''
-            mins = ''
+        hours = format_seconds_to_hm((record.exit_time - record.entry_time).total_seconds()) if record.exit_time else ''
         coords = f"{record.latitude:.6f}, {record.longitude:.6f}" if record.latitude and record.longitude else ''
-        writer.writerow([
-            record.date.strftime('%d/%m/%Y'),
-            record.entry_time.strftime('%H:%M'),
-            record.exit_time.strftime('%H:%M') if record.exit_time else 'En curso',
-            dur_hhmm,
-            mins,
-            record.location or '',
-            coords
-        ])
+        writer.writerow([record.date.strftime('%d/%m/%Y'), record.entry_time.strftime('%H:%M'),
+                        record.exit_time.strftime('%H:%M') if record.exit_time else 'En curso', hours, record.location or '', coords])
     output.seek(0)
-    return send_file(
-        io.BytesIO(output.getvalue().encode('utf-8')),
-        mimetype='text/csv',
-        as_attachment=True,
-        download_name=f'reporte_{start_date}_{end_date}.csv'
-    )
+    return send_file(io.BytesIO(output.getvalue().encode('utf-8')), mimetype='text/csv', as_attachment=True, download_name=f'reporte_{start_date}_{end_date}.csv')
 
 def generate_pdf_report(records, start_date, end_date):
-    buffer = io.BytesIO()
-    p = canvas.Canvas(buffer, pagesize=A4)
-    p.setFont("Helvetica-Bold", 16)
-    p.drawString(100, 800, "Reporte de fichajes")
-    p.setFont("Helvetica", 12)
-    p.drawString(100, 780, f"Período: {start_date} a {end_date}")
-    p.drawString(100, 760, f"Usuario: {current_user.name}")
-    y = 720
-    p.setFont("Helvetica-Bold", 10)
-    p.drawString(100, y, "Fecha")
-    p.drawString(150, y, "Entrada")
-    p.drawString(200, y, "Salida")
-    p.drawString(250, y, "Duración")
-    p.drawString(300, y, "Ubicación")
-    p.setFont("Helvetica", 10)
-    y -= 20
-    for record in records:
-        if y < 100:
-            p.showPage()
-            y = 800
-            p.setFont("Helvetica", 10)
-        hours_txt = format_hhmm((record.exit_time - record.entry_time).total_seconds()) if record.exit_time else 'En curso'
-        location = (record.location or '')[:27] + '...' if len(record.location or '') > 30 else (record.location or '')
-        p.drawString(100, y, record.date.strftime('%d/%m/%Y'))
-        p.drawString(150, y, record.entry_time.strftime('%H:%M'))
-        p.drawString(200, y, record.exit_time.strftime('%H:%M') if record.exit_time else 'En curso')
-        p.drawString(250, y, hours_txt)
-        p.drawString(300, y, location)
-        y -= 15
-    p.save()
-    buffer.seek(0)
-    return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=f'reporte_{start_date}_{end_date}.pdf')
+     buffer = io.BytesIO()
 
-# ============================
-# STATS
-# ============================
+     # Documento y estilos
+     doc = SimpleDocTemplate(
+         buffer,
+         pagesize=A4,
+         leftMargin=2*cm, rightMargin=2*cm,
+         topMargin=2.2*cm, bottomMargin=2*cm
+     )
+     styles = getSampleStyleSheet()
+     styles.add(ParagraphStyle(
+         name="TitleBig",
+         parent=styles["Heading1"],
+         fontName="Helvetica-Bold",
+         fontSize=18,
+         textColor=colors.HexColor("#111827"),
+         spaceAfter=8
+     ))
+     styles.add(ParagraphStyle(
+         name="Meta",
+         parent=styles["Normal"],
+         fontSize=10,
+         textColor=colors.HexColor("#4B5563"),
+         leading=14,
+         spaceAfter=3
+     ))
+     styles.add(ParagraphStyle(
+         name="Cell",
+         parent=styles["Normal"],
+         fontSize=9,
+         leading=12
+     ))
+     styles.add(ParagraphStyle(
+         name="CellBold",
+         parent=styles["Normal"],
+         fontName="Helvetica-Bold",
+         fontSize=9,
+         leading=12
+     ))
+
+     elements = []
+
+     # Cabecera con título y (opcional) logo
+     title_row = []
+     logo_path = os.path.join(app.root_path, "static", "icon-144x144.png")
+     if os.path.exists(logo_path):
+         title_row.append(Image(logo_path, width=1.2*cm, height=1.2*cm))
+     else:
+         title_row.append(Spacer(1, 1.2*cm))  # mantiene alineación
+
+     title_row.append(Paragraph("Reporte de fichajes", styles["TitleBig"]))
+     header_tbl = Table([title_row], colWidths=[1.4*cm, doc.width - 1.4*cm])
+     header_tbl.setStyle(TableStyle([
+         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+     ]))
+     elements.append(header_tbl)
+
+     # Metadatos
+     periodo = f"{start_date.strftime('%d/%m/%Y')} a {end_date.strftime('%d/%m/%Y')}"
+     elements.append(Paragraph(f"<b>Usuario:</b> {current_user.name}", styles["Meta"]))
+     elements.append(Paragraph(f"<b>Período:</b> {periodo}", styles["Meta"]))
+     elements.append(Paragraph(f"<b>Email:</b> {current_user.email}", styles["Meta"]))
+     elements.append(Spacer(1, 6))
+
+     # ---- Tabla de registros ----
+     # Cabeceras
+     data = [[
+         Paragraph("Fecha", styles["CellBold"]),
+         Paragraph("Entrada", styles["CellBold"]),
+         Paragraph("Salida", styles["CellBold"]),
+         Paragraph("Duración", styles["CellBold"]),
+         Paragraph("Ubicación", styles["CellBold"]),
+         Paragraph("Coordenadas", styles["CellBold"]),
+     ]]
+
+     total_seconds = 0
+     open_sessions = 0
+     unique_days = set()
+
+     for r in records:
+         unique_days.add(r.date)
+         fecha = r.date.strftime("%d/%m/%Y")
+         entrada = r.entry_time.strftime("%H:%M") if r.entry_time else "—"
+         if r.exit_time:
+             salida = r.exit_time.strftime("%H:%M")
+             dur_secs = (r.exit_time - r.entry_time).total_seconds()
+             dur = format_seconds_to_hm(dur_secs)
+             total_seconds += int(dur_secs)
+         else:
+             salida = "En curso"
+             dur = "En curso"
+             open_sessions += 1
+
+         ubic = Paragraph((r.location or "—"), styles["Cell"])
+         coords = "—"
+         if r.latitude is not None and r.longitude is not None:
+             try:
+                 coords = f"{float(r.latitude):.5f}, {float(r.longitude):.5f}"
+             except Exception:
+                 coords = f"{r.latitude}, {r.longitude}"
+
+         data.append([
+             Paragraph(fecha, styles["Cell"]),
+             Paragraph(entrada, styles["Cell"]),
+             Paragraph(salida, styles["Cell"]),
+             Paragraph(dur, styles["Cell"]),
+             ubic,
+             Paragraph(coords, styles["Cell"]),
+         ])
+
+     # Anchos de columna (auto para ubicación)
+     fixed_widths = [2.2*cm, 1.8*cm, 1.8*cm, 2.5*cm, 3.0*cm]  # sin la col de ubicación
+     auto_width = doc.width - sum(fixed_widths)
+     col_widths = [2.2*cm, 1.8*cm, 1.8*cm, 2.5*cm, auto_width, 3.0*cm]
+     if auto_width < 5*cm:
+         # Si el espacio para ubicación queda muy pequeño, recorta coords
+         col_widths = [2.0*cm, 1.6*cm, 1.6*cm, 2.2*cm, doc.width - (2.0*cm + 1.6*cm + 1.6*cm + 2.2*cm + 2.6*cm), 2.6*cm]
+
+     table = Table(data, colWidths=col_widths, repeatRows=1)
+     table.setStyle(TableStyle([
+         # Cabecera
+         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2563EB")),  # azul
+         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+         ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+         ("TOPPADDING", (0, 0), (-1, 0), 6),
+         ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+
+         # Rayado alterno
+         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F3F4F6")]),
+
+         # Alineaciones por columna
+         ("ALIGN", (0, 1), (0, -1), "CENTER"),  # fecha
+         ("ALIGN", (1, 1), (3, -1), "CENTER"),  # entrada/salida/duración
+         ("VALIGN", (0, 1), (-1, -1), "TOP"),
+
+         # Rejilla
+         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E5E7EB")),
+     ]))
+     elements.append(table)
+     elements.append(Spacer(1, 10))
+
+     # ---- Resumen ----
+     avg_per_day = int(total_seconds / max(len(unique_days), 1))
+     resumen = [
+         [Paragraph("<b>Sesiones cerradas</b>", styles["Cell"]), Paragraph(str(len([r for r in records if r.exit_time])), styles["Cell"])],
+         [Paragraph("<b>Sesiones abiertas</b>", styles["Cell"]), Paragraph(str(open_sessions), styles["Cell"])],
+         [Paragraph("<b>Total trabajado</b>", styles["Cell"]), Paragraph(format_seconds_to_hm(total_seconds), styles["Cell"])],
+         [Paragraph("<b>Promedio por día</b>", styles["Cell"]), Paragraph(format_seconds_to_hm(avg_per_day), styles["Cell"])],
+     ]
+     resumen_tbl = Table(resumen, colWidths=[5.5*cm, doc.width - 5.5*cm])
+     resumen_tbl.setStyle(TableStyle([
+         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EFF6FF")),
+         ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5E7EB")),
+         ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E5E7EB")),
+         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+         ("TOPPADDING", (0, 0), (-1, -1), 6),
+         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+     ]))
+     elements.append(Paragraph("Resumen", styles["CellBold"]))
+     elements.append(Spacer(1, 4))
+     elements.append(resumen_tbl)
+     elements.append(Spacer(1, 12))
+
+     # Firmas (opcional)
+     # Leyenda final con autoría
+     footer_tbl = Table(
+         [[Paragraph('Este Fichador ha sido realizado por @chriismartinezz', styles["Cell"])]],
+         colWidths=[doc.width]
+     )
+     footer_tbl.setStyle(TableStyle([
+         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+         ("LINEABOVE", (0, 0), (-1, 0), 0.7, colors.HexColor("#9CA3AF")),
+         ("TOPPADDING", (0, 0), (-1, -1), 12),
+         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+     ]))
+     elements.append(footer_tbl)
+
+
+     # Construir PDF con pie de página
+     doc.build(elements, onFirstPage=_pdf_footer, onLaterPages=_pdf_footer)
+
+     buffer.seek(0)
+     fname = f"reporte_{start_date.strftime('%Y-%m-%d')}_{end_date.strftime('%Y-%m-%d')}.pdf"
+     return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=fname)
+
+
+def _pdf_footer(canvas, doc):
+    from datetime import datetime as _dt
+    canvas.saveState()
+    canvas.setFont("Helvetica", 9)
+    canvas.setFillColor(colors.HexColor("#6B7280"))  # gris
+    # Fecha y hora de generación (izquierda)
+    canvas.drawString(doc.leftMargin, 1.2 * cm, f"Generado el {_dt.now().strftime('%d/%m/%Y %H:%M')}")
+    # Número de página (derecha)
+    canvas.drawRightString(doc.rightMargin + doc.width, 1.2 * cm, f"Página {doc.page}")
+    canvas.restoreState()
+
+
 @app.route('/stats')
 @login_required
 def stats():
@@ -542,103 +932,11 @@ def stats():
     for i in range(7):
         day = week_start + timedelta(days=i)
         records = TimeRecord.query.filter_by(user_id=current_user.id, date=day).all()
-        day_hours = sum((r.exit_time - r.entry_time).total_seconds() / 3600 for r in records if r.exit_time)
+        day_hours = sum((record.exit_time - record.entry_time).total_seconds() / 3600 for record in records if record.exit_time)
         daily_hours.append(round(day_hours, 2))
     return render_template('stats.html', daily_hours=daily_hours)
 
-# ============================
-# SCHEDULE (vista + CRUD)
-# ============================
-@app.route('/schedule')
-@login_required
-def schedule():
-    schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.day_of_week, Schedule.start_time).all()
-    return render_template('schedule.html', schedules=schedules)
-
-@app.route('/schedule/add', methods=['POST'])
-@login_required
-def add_schedule():
-    day_of_week = int(request.form.get('day_of_week'))
-    start_time_str = request.form.get('start_time')
-    end_time_str = request.form.get('end_time')
-    hours_required = float(request.form.get('hours_required', 0))
-    try:
-        start_t = datetime.strptime(start_time_str, '%H:%M').time()
-        end_t = datetime.strptime(end_time_str, '%H:%M').time()
-    except Exception:
-        flash('Formato de hora inválido', 'error')
-        return redirect(url_for('schedule'))
-    sch = Schedule(
-        user_id=current_user.id,
-        day_of_week=day_of_week,
-        start_time=start_t,
-        end_time=end_t,
-        hours_required=hours_required,
-        is_active=True
-    )
-    db.session.add(sch)
-    db.session.commit()
-    flash('Horario añadido', 'success')
-    return redirect(url_for('schedule'))
-
-@app.route('/schedule/toggle/<int:id>')
-@login_required
-def toggle_schedule(id):
-    sch = Schedule.query.get_or_404(id)
-    if sch.user_id != current_user.id:
-        flash('No tienes permisos para modificar este horario', 'error')
-        return redirect(url_for('schedule'))
-    sch.is_active = not sch.is_active
-    db.session.commit()
-    flash('Horario actualizado', 'success')
-    return redirect(url_for('schedule'))
-
-@app.route('/schedule/delete/<int:id>')
-@login_required
-def delete_schedule(id):
-    sch = Schedule.query.get_or_404(id)
-    if sch.user_id != current_user.id:
-        flash('No tienes permisos para eliminar este horario', 'error')
-        return redirect(url_for('schedule'))
-    db.session.delete(sch)
-    db.session.commit()
-    flash('Horario eliminado', 'success')
-    return redirect(url_for('schedule'))
-
-@app.route('/schedule/copy_week', methods=['POST'])
-@login_required
-def copy_week():
-    source_day = int(request.form.get('source_day', -1))
-    target_days = [int(d) for d in request.form.getlist('target_days[]')]
-    src = Schedule.query.filter_by(user_id=current_user.id, day_of_week=source_day).first()
-    if not src:
-        flash('No hay horario configurado para el día origen', 'error')
-        return redirect(url_for('schedule'))
-    for d in target_days:
-        if d == source_day:
-            continue
-        existing = Schedule.query.filter_by(user_id=current_user.id, day_of_week=d).first()
-        if existing:
-            existing.start_time = src.start_time
-            existing.end_time = src.end_time
-            existing.hours_required = src.hours_required
-            existing.is_active = src.is_active
-        else:
-            db.session.add(Schedule(
-                user_id=current_user.id,
-                day_of_week=d,
-                start_time=src.start_time,
-                end_time=src.end_time,
-                hours_required=src.hours_required,
-                is_active=src.is_active
-            ))
-    db.session.commit()
-    flash('Semana copiada', 'success')
-    return redirect(url_for('schedule'))
-
-# ============================
-# Admin
-# ============================
+# Admin routes
 @app.route('/admin')
 @login_required
 def admin():
@@ -676,6 +974,7 @@ def admin_create_user():
 
     print(f"👤 Usuario creado: {name} ({email})")
 
+    # ENVÍO CON RESEND
     if send_setup_password_email(new_user):
         flash(f'✅ Usuario {name} creado correctamente. Se ha enviado el correo a {email}', 'success')
     else:
@@ -774,16 +1073,9 @@ def admin_add_record():
     exit_time = datetime.strptime(exit_time_str, '%H:%M').time() if exit_time_str else None
     latitude = float(request.form.get('latitude')) if request.form.get('latitude') else None
     longitude = float(request.form.get('longitude')) if request.form.get('longitude') else None
-    new_record = TimeRecord(
-        user_id=user_id,
-        date=date,
-        entry_time=datetime.combine(date, entry_time),
-        exit_time=datetime.combine(date, exit_time) if exit_time else None,
-        location=request.form.get('location', ''),
-        latitude=latitude,
-        longitude=longitude,
-        notes=request.form.get('notes', '')
-    )
+    new_record = TimeRecord(user_id=user_id, date=date, entry_time=datetime.combine(date, entry_time),
+                           exit_time=datetime.combine(date, exit_time) if exit_time else None,
+                           location=request.form.get('location', ''), latitude=latitude, longitude=longitude, notes=request.form.get('notes', ''))
     db.session.add(new_record)
     db.session.commit()
     flash('Registro añadido correctamente', 'success')
@@ -802,22 +1094,13 @@ def admin_delete_record(record_id):
     flash('Fichaje eliminado correctamente', 'success')
     return redirect(url_for('admin_user_records', user_id=user_id))
 
-@app.route('/admin/test-mail')
+@app.route('/logout')
 @login_required
-def admin_test_mail():
-    if not current_user.is_admin:
-        flash('No tienes permisos', 'error')
-        return redirect(url_for('dashboard'))
-    ok = send_setup_password_email(current_user)
-    if ok:
-        flash('✅ Correo de prueba enviado con SendGrid', 'success')
-    else:
-        flash('❌ Error al enviar el correo de prueba (revisa Logs)', 'error')
-    return redirect(url_for('admin'))
+def logout():
+    logout_user()
+    return redirect(url_for('index'))
 
-# ============================
-# API / PWA
-# ============================
+# API Routes
 @app.route('/manifest.json')
 def manifest():
     return send_file('static/manifest.json', mimetype='application/json')
@@ -830,29 +1113,19 @@ def service_worker():
 @login_required
 def api_schedules():
     schedules = Schedule.query.filter_by(user_id=current_user.id, is_active=True).all()
-    return jsonify([
-        {
-            'id': s.id,
-            'day_of_week': s.day_of_week,
-            'start_time': s.start_time.strftime('%H:%M'),
-            'end_time': s.end_time.strftime('%H:%M'),
-            'hours_required': s.hours_required
-        } for s in schedules
-    ])
+    return jsonify([{'id': s.id, 'day_of_week': s.day_of_week, 'start_time': s.start_time.strftime('%H:%M'),
+                    'end_time': s.end_time.strftime('%H:%M'), 'hours_required': s.hours_required} for s in schedules])
 
 @app.route('/api/active_record')
 @login_required
 def api_active_record():
     today = datetime.now().date()
     active_record = TimeRecord.query.filter_by(user_id=current_user.id, date=today, exit_time=None).first()
-    return jsonify({
-        'has_active_record': active_record is not None,
-        'entry_time': active_record.entry_time.isoformat() if active_record else None
-    })
+    return jsonify({'has_active_record': active_record is not None, 'entry_time': active_record.entry_time.isoformat() if active_record else None})
 
-# ============================
-# Errores
-# ============================
+
+
+# Error handlers
 @app.errorhandler(404)
 def not_found_error(error):
     return render_template('404.html'), 404
@@ -862,12 +1135,12 @@ def internal_error(error):
     db.session.rollback()
     return render_template('500.html'), 500
 
-# ============================
-# Init DB
-# ============================
+# Inicialización de la base de datos
 def init_db():
+    """Inicializa la base de datos y crea el usuario admin si no existe"""
     with app.app_context():
         db.create_all()
+        # Crear usuario admin solo si no existe
         if not User.query.filter_by(email='christianconhr@gmail.com').first():
             admin = User(
                 email='christianconhr@gmail.com',
@@ -882,10 +1155,30 @@ def init_db():
             print("✓ Usuario Admin Christian creado")
         print("✅ Base de datos inicializada correctamente")
 
-# Entrypoint
+
+
+
+@app.route('/admin/test-mail')
+@login_required
+def admin_test_mail():
+    if not current_user.is_admin:
+        flash('No tienes permisos', 'error')
+        return redirect(url_for('dashboard'))
+
+    # Enviará un correo de “configura tu contraseña” al propio admin,
+    # solo para verificar que SendGrid funciona.
+    ok = send_setup_password_email(current_user)
+    if ok:
+        flash('✅ Correo de prueba enviado con SendGrid', 'success')
+    else:
+        flash('❌ Error al enviar el correo de prueba (revisa Logs)', 'error')
+    return redirect(url_for('admin'))
+
+
+# En desarrollo local
 if __name__ == '__main__':
     init_db()
     app.run(debug=True)
 else:
-    # Render: inicializar DB al arrancar
+    # En producción (Render), inicializar DB automáticamente al arrancar
     init_db()
