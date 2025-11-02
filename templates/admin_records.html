@@ -32,10 +32,10 @@
         {% for record in records.items %}
         <tr class="{{ 'table-warning' if not record.exit_time }}">
             <td>{{ record.date.strftime('%d/%m/%Y') }}</td>
-            <td>{{ record.entry_time.strftime('%H:%M') }}</td>
+            <td>{{ record.entry_time|localdt('%H:%M') }}</td>
             <td>
                 {% if record.exit_time %}
-                {{ record.exit_time.strftime('%H:%M') }}
+                {{ record.exit_time|localdt('%H:%M') }}
                 {% else %}
                 <span class="badge bg-warning">En curso</span>
                 {% endif %}

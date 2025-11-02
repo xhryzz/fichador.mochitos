@@ -1426,21 +1426,40 @@ def _job_notify_open_record(now=None):
                 sent += 1
     return sent
 
-def _job_weekly_summary(now=None):
-    now = now or now_local()
-    users = User.query.all()
+def _job_weekly_summary(now=None, force=False, user_id=None):
+    # Usa tu helper si lo tienes; si no, cae a now() “normal”
+    try:
+        current = now or now_local()  # tu función que respeta Europe/Madrid
+    except NameError:
+        current = now or datetime.now()
+
+    qs = User.query
+    if user_id:
+        qs = qs.filter_by(id=user_id)
+    users = qs.all()
+
     sent = 0
     for u in users:
         s = NotificationSettings.query.filter_by(user_id=u.id).first()
         if not (s and s.push_enabled):
             continue
-        if now.weekday() == s.weekly_summary_day and now.time() >= s.weekly_summary_time and s.last_weekly_sent != now.date():
-            total_required = u.total_hours_required or 150.0
-            done = hours_worked_total(u)
-            remaining = max(total_required - done, 0)
-            msg = f"Te quedan {remaining:.1f} h para finalizar las prácticas (hechas {done:.1f}/{total_required:.1f})."
-            if send_push_to_user(u, "📊 Resumen semanal", msg):
-                s.last_weekly_sent = now.date()
+
+        cond = (
+            current.weekday() == s.weekly_summary_day and
+            current.time() >= s.weekly_summary_time and
+            s.last_weekly_sent != getattr(current, "date", lambda: current.date)()
+        )
+
+        if force or cond:
+            total_required = getattr(u, "total_hours_required", None) or 150.0
+            done = hours_worked_total(u)  # tu helper existente
+            remaining = max(total_required - done, 0.0)
+
+            title = "📊 Resumen semanal"
+            body = f"Te quedan {remaining:.1f} h para finalizar las prácticas (hechas {done:.1f}/{total_required:.1f})."
+
+            if send_push_to_user(u, title, body):
+                s.last_weekly_sent = current.date() if hasattr(current, "date") else datetime.now().date()
                 db.session.commit()
                 sent += 1
     return sent
@@ -1493,24 +1512,52 @@ def api_push_subscribe():
     if not (endpoint and p256dh and authk):
         return jsonify({"ok": False, "error": "Bad subscription"}), 400
 
+    # Crear/actualizar la suscripción Web Push
     sub = PushSubscription.query.filter_by(endpoint=endpoint).first()
     if sub:
         sub.p256dh = p256dh
         sub.auth = authk
         sub.is_active = True
         sub.user_id = current_user.id
+        sub.user_agent = ua
     else:
         sub = PushSubscription(
             user_id=current_user.id,
             endpoint=endpoint,
             p256dh=p256dh,
             auth=authk,
-            user_agent=ua
+            user_agent=ua,
+            is_active=True
         )
         db.session.add(sub)
+
+    # === Auto-activar notificaciones en ajustes del usuario ===
+    s = NotificationSettings.query.filter_by(user_id=current_user.id).first()
+    if not s:
+        # Defaults “seguros”: Domingo (6, convención Python) a las 18:00
+        s = NotificationSettings(
+            user_id=current_user.id,
+            weekly_summary_day=6,                # Domingo en Python: L=0..D=6
+            weekly_summary_time=time(18, 0),
+            push_enabled=True
+        )
+        db.session.add(s)
+    else:
+        s.push_enabled = True  # clave: habilita para que los jobs te incluyan
+
     db.session.commit()
     return jsonify({"ok": True})
 
+
+ from flask import jsonify
+ from flask_login import login_required, current_user
+
+ @app.post('/me/send-weekly-now')
+ @login_required
+ def me_send_weekly_now():
+     # Lanza el job sólo para el usuario actual y forzando envío
+     sent = _job_weekly_summary(force=True, user_id=current_user.id)
+     return jsonify(ok=True, sent=sent)
 @app.post('/api/push/unsubscribe')
 @login_required
 def api_push_unsubscribe():

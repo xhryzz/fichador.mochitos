@@ -90,6 +90,9 @@
             <button id="btnTest" class="btn btn-outline-success" type="button">
                 <i class="fas fa-paper-plane me-1"></i> Enviar prueba
             </button>
+            <button id="btnWeeklyNow" type="button" class="btn btn-outline-primary">
+                Enviar resumen semanal ahora
+            </button>
         </div>
 
         <p class="mt-2 small text-muted">
@@ -159,6 +162,22 @@
         const r = await fetch('/api/push/test', { method: 'POST' });
         const j = await r.json();
         alert(j.ok ? 'Enviada ✅' : 'Fallo ❌');
+    });
+
+    document.getElementById('btnWeeklyNow')?.addEventListener('click', async () => {
+        try {
+            const r = await fetch('/me/send-weekly-now', { method: 'POST' });
+            const j = await r.json();
+            if (j.ok && j.sent > 0) {
+                alert('Resumen enviado ✅');
+            } else if (j.ok) {
+                alert('No se envió (revisa push activado y filtros) ❕');
+            } else {
+                alert('Error ❌ ' + (j.error || ''));
+            }
+        } catch (e) {
+            alert('Error de red ❌');
+        }
     });
 </script>
 {% endblock %}

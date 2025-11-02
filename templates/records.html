@@ -27,10 +27,10 @@
         {% for record in records.items %}
         <tr class="{{ 'table-warning' if not record.exit_time }}">
             <td>{{ record.date.strftime('%d/%m/%Y') }}</td>
-            <td>{{ record.entry_time.strftime('%H:%M') }}</td>
+            <td>{{ record.entry_time|localdt('%H:%M') }}</td>
             <td>
                 {% if record.exit_time %}
-                {{ record.exit_time.strftime('%H:%M') }}
+                {{ record.exit_time|localdt('%H:%M') }}
                 {% else %}
                 <span class="badge bg-warning">En curso</span>
                 {% endif %}
@@ -111,15 +111,11 @@
 
 {% block scripts %}
 <script>
-    // Modal + Leaflet
+    // (igual que lo tenías)
     let recordMapInstance = null;
-
     function setupRecordMap(lat, lng) {
         const container = document.getElementById('recordMap');
-        if (recordMapInstance) {
-            recordMapInstance.remove();
-            recordMapInstance = null;
-        }
+        if (recordMapInstance) { recordMapInstance.remove(); recordMapInstance = null; }
         container.innerHTML = '';
         recordMapInstance = L.map('recordMap').setView([lat, lng], 16);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -127,7 +123,6 @@
         }).addTo(recordMapInstance);
         L.marker([lat, lng]).addTo(recordMapInstance).bindPopup('Ubicación registrada').openPopup();
     }
-
     document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.view-map-btn').forEach(btn => {
             btn.addEventListener('click', function() {
@@ -135,7 +130,6 @@
                 const lng = parseFloat(this.dataset.lng);
                 const location = this.dataset.location || '';
                 document.getElementById('modalLocationText').textContent = location;
-                // Espera a que el modal se muestre para inicializar correctamente Leaflet
                 const modalEl = document.getElementById('recordMapModal');
                 modalEl.addEventListener('shown.bs.modal', () => setupRecordMap(lat, lng), { once: true });
             });

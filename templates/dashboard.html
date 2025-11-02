@@ -273,7 +273,7 @@
             if (statusElement) statusElement.innerHTML = `<div class="alert alert-success">Ubicación detectada: ${address}</div>`;
             return { location: address, lat: browserPosition.lat, lng: browserPosition.lng };
         } catch (e) {
-            if (statusElement) statusElement.innerHTML = `<div class="alert alert-warning">Usando ubicación del trabajo (fallback)</div>`;
+            if (statusElement) statusElement.innerHTML = `<div class="alert alert-warning">Usando ubicación de Practicas</div>`;
             initMap(WORK_LAT, WORK_LNG, WORK_LOCATION);
             return { location: WORK_LOCATION, lat: WORK_LAT, lng: WORK_LNG };
         }
