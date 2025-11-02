@@ -3,265 +3,162 @@
 
 {% block content %}
 <div class="container py-4">
-  <h1 class="mb-3"><i class="fas fa-bell me-2"></i> Notificaciones</h1>
+    <h1 class="mb-3"><i class="fas fa-bell me-2"></i> Notificaciones</h1>
 
-  <div class="alert alert-info">
-    <strong>Consejo:</strong> Para recibir push en iPhone, abre la web en Safari y usa
-    <em>Añadir a pantalla de inicio</em>. En todos los casos, el sitio debe estar servido por <strong>HTTPS</strong>.
-  </div>
+    <div class="alert alert-info">
+        <strong>Consejo:</strong> En iPhone debes “Añadir a pantalla de inicio” para recibir push. En todos los casos, el sitio debe estar con HTTPS.
+    </div>
 
-  <div class="row g-4">
-    <!-- Col izquierda: formulario -->
-    <div class="col-lg-8">
-      <form method="POST" class="card">
-        <div class="card-header">
-          <strong>Ajustes de notificaciones</strong>
-        </div>
-        <div class="card-body">
-
-          <!-- Activar push -->
-          <div class="form-check form-switch mb-4">
+    <form method="POST" class="card p-3 mb-4">
+        <div class="form-check form-switch mb-3">
             <input
-              class="form-check-input"
-              type="checkbox"
-              id="push_enabled"
-              name="push_enabled"
-              {% if settings and settings.push_enabled %}checked{% endif %}>
-            <label class="form-check-label" for="push_enabled">
-              Activar notificaciones push
-            </label>
-            <div class="form-text">
-              Si está desactivado, no se enviará ningún aviso al dispositivo.
-            </div>
-          </div>
+                    class="form-check-input"
+                    type="checkbox"
+                    id="push_enabled"
+                    name="push_enabled"
+                    {% if settings and settings.push_enabled %}checked{% endif %}
+            >
+            <label class="form-check-label" for="push_enabled">Activar notificaciones push</label>
+        </div>
 
-          <!-- Bloque: Entradas -->
-          <div class="mb-4">
-            <h5 class="mb-2"><i class="fas fa-sign-in-alt me-2"></i> Recordatorios de <u>entrada</u></h5>
-            <div class="row g-3 align-items-end">
-              <div class="col-sm-6 col-md-4">
-                <label class="form-label" for="minutes_after_start_no_entry">
-                  Minutos tras la hora de inicio <span class="text-muted">(por turno)</span>
-                </label>
-                <input type="number" min="0" step="1" class="form-control"
-                       id="minutes_after_start_no_entry"
-                       name="minutes_after_start_no_entry"
-                       value="{{ (settings.minutes_after_start_no_entry if settings else 5) }}">
-                <div class="form-text">
-                  <strong>“No has fichado y ya es hora”</strong>. Si pasan estos minutos desde la
-                  <em>hora de inicio</em> del turno 1 o del turno 2 y no hay fichaje de entrada,
-                  se envía el aviso. Recomendado: <code>5</code>.
-                </div>
-              </div>
+        <div class="row g-3">
+            <div class="col-sm-6 col-md-4">
+                <label class="form-label">Min. tras hora de entrada sin fichar</label>
+                <input
+                        type="number"
+                        class="form-control"
+                        name="minutes_after_start_no_entry"
+                        value="{{ settings.minutes_after_start_no_entry if settings else 5 }}"
+                >
             </div>
 
-            <div class="small text-muted mt-2">
-              <em>Ejemplo:</em> turno 1 a <code>08:00</code> y turno 2 a <code>16:00</code> con este valor en <code>5</code>
-              &rarr; avisos a <code>08:05</code> y <code>16:05</code> si no hay entrada.
-            </div>
-          </div>
-
-          <hr>
-
-          <!-- Bloque: Cierres -->
-          <div class="mb-4">
-            <h5 class="mb-2"><i class="fas fa-sign-out-alt me-2"></i> Recordatorios de <u>cierre</u></h5>
-
-            <div class="row g-3">
-              <div class="col-sm-6 col-md-4">
-                <label class="form-label" for="open_record_minutes">
-                  Minutos con fichaje abierto
-                </label>
-                <input type="number" min="0" step="1" class="form-control"
-                       id="open_record_minutes"
-                       name="open_record_minutes"
-                       value="{{ (settings.open_record_minutes if settings else 15) }}">
-                <div class="form-text">
-                  <strong>“Tienes un fichaje abierto”</strong>. Avisa cuando un fichaje permanece abierto
-                  al menos estos minutos desde la entrada. Recomendado: <code>15</code>.
-                </div>
-              </div>
-
-              <div class="col-sm-6 col-md-4">
-                <label class="form-label" for="end_passed_minutes">
-                  Minutos tras la hora de fin <span class="text-muted">(por turno)</span>
-                </label>
-                <input type="number" min="0" step="1" class="form-control"
-                       id="end_passed_minutes"
-                       name="end_passed_minutes"
-                       value="{{ (settings.end_passed_minutes if settings else 5) }}">
-                <div class="form-text">
-                  En cuanto pasa la <em>hora de fin</em> del turno 1 o del turno 2 más este margen,
-                  se recuerda cerrar si el fichaje sigue abierto. Recomendado: <code>5</code>.
-                </div>
-              </div>
+            <div class="col-sm-6 col-md-4">
+                <label class="form-label">Recordar fichaje abierto a los (min)</label>
+                <input
+                        type="number"
+                        class="form-control"
+                        name="open_record_minutes"
+                        value="{{ settings.open_record_minutes if settings else 15 }}"
+                >
             </div>
 
-            <div class="small text-muted mt-2">
-              <em>Ejemplo:</em> turno 1 termina a <code>14:00</code> y turno 2 a <code>20:00</code> con este valor en <code>5</code>
-              &rarr; avisos a <code>14:05</code> y <code>20:05</code> si sigue abierto.
+            <div class="col-sm-6 col-md-4">
+                <label class="form-label">Avisar si pasó fin + (min)</label>
+                <input
+                        type="number"
+                        class="form-control"
+                        name="end_passed_minutes"
+                        value="{{ settings.end_passed_minutes if settings else 15 }}"
+                >
             </div>
-          </div>
 
-          <hr>
-
-          <!-- Bloque: Resumen semanal -->
-          <div class="mb-3">
-            <h5 class="mb-2"><i class="fas fa-calendar-week me-2"></i> Resumen semanal</h5>
-            <div class="row g-3">
-              <div class="col-sm-6 col-md-5">
-                <label class="form-label" for="weekly_summary_day">
-                  Día
-                </label>
-                <select class="form-select" id="weekly_summary_day" name="weekly_summary_day">
-                  {% set d = (settings.weekly_summary_day if settings else 6) %}
-                  <option value="0" {% if d==0 %}selected{% endif %}>Lunes</option>
-                  <option value="1" {% if d==1 %}selected{% endif %}>Martes</option>
-                  <option value="2" {% if d==2 %}selected{% endif %}>Miércoles</option>
-                  <option value="3" {% if d==3 %}selected{% endif %}>Jueves</option>
-                  <option value="4" {% if d==4 %}selected{% endif %}>Viernes</option>
-                  <option value="5" {% if d==5 %}selected{% endif %}>Sábado</option>
-                  <option value="6" {% if d==6 %}selected{% endif %}>Domingo</option>
+            <div class="col-sm-6 col-md-4">
+                <label class="form-label">Día resumen semanal</label>
+                <select class="form-select" name="weekly_summary_day">
+                    {% set dias = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'] %}
+                    {% for d in dias %}
+                    <option
+                            value="{{ loop.index0 }}"
+                            {% if settings and settings.weekly_summary_day == loop.index0 %}selected{% endif %}
+                    >
+                        {{ d }}
+                    </option>
+                    {% endfor %}
                 </select>
-              </div>
-
-              <div class="col-sm-6 col-md-4">
-                <label class="form-label" for="weekly_summary_time">Hora</label>
-                <input type="time" class="form-control"
-                       id="weekly_summary_time"
-                       name="weekly_summary_time"
-                       value="{{ settings.weekly_summary_time.strftime('%H:%M') if settings and settings.weekly_summary_time else '18:00' }}">
-              </div>
             </div>
-            <div class="form-text mt-2">
-              En ese día/hora se enviará un resumen con <em>horas hechas</em> y <em>horas restantes</em> para las prácticas.
-              Predeterminado: <strong>Domingo 18:00</strong>.
-            </div>
-          </div>
 
+            <div class="col-sm-6 col-md-4">
+                <label class="form-label">Hora resumen semanal</label>
+                <input
+                        type="time"
+                        class="form-control"
+                        name="weekly_summary_time"
+                        value="{% if settings and settings.weekly_summary_time %}{{ settings.weekly_summary_time.strftime('%H:%M') }}{% else %}19:00{% endif %}"
+                >
+            </div>
         </div>
-        <div class="card-footer d-flex justify-content-end gap-2">
-          <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">
-            Cancelar
-          </a>
-          <button type="submit" class="btn btn-primary">
-            <i class="fas fa-save me-1"></i> Guardar cambios
-          </button>
-        </div>
-      </form>
-    </div>
 
-    <!-- Col derecha: estado + vista previa -->
-    <div class="col-lg-4">
-      <div class="card mb-3">
-        <div class="card-header"><strong>Estado y prueba</strong></div>
-        <div class="card-body">
-          <div class="row g-3">
-            <div class="col-12">
-              <div class="d-flex align-items-center justify-content-between">
-                <span>Permiso de notificaciones</span>
-                <span id="stPerm" class="badge bg-secondary">—</span>
-              </div>
-              <small class="text-muted">Si el permiso es “denegado”, debes permitirlo en el navegador.</small>
-            </div>
-            <div class="col-12">
-              <div class="d-flex align-items-center justify-content-between">
-                <span>Suscripción push</span>
-                <span id="stSub" class="badge bg-secondary">—</span>
-              </div>
-              <small class="text-muted">Indica si este dispositivo está suscrito para recibir avisos.</small>
-            </div>
-            <div class="col-12">
-              <div class="d-flex align-items-center justify-content-between">
-                <span>Service Worker</span>
-                <span id="stSW" class="badge bg-secondary">—</span>
-              </div>
-              <small class="text-muted">Necesario para recibir mensajes en segundo plano.</small>
-            </div>
-          </div>
-
-          <div class="d-grid mt-3">
-            <button type="button" id="btnTestPush" class="btn btn-outline-primary">
-              <i class="fas fa-paper-plane me-1"></i> Probar notificación
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+            <button class="btn btn-primary" type="submit">
+                <i class="fas fa-save me-1"></i> Guardar
             </button>
-          </div>
-        </div>
-      </div>
 
-      <div class="card">
-        <div class="card-header"><strong>Vista previa (ejemplo)</strong></div>
-        <div class="card-body">
-          <p class="text-muted mb-2">
-            Suponiendo turnos <code>08:00–14:00</code> y <code>16:00–20:00</code>:
-          </p>
-          <ul class="small mb-0">
-            <li>Entrada turno 1: <code id="pvIn1">08:05</code> (inicio + <span id="pvInMin">5</span> min)</li>
-            <li>Entrada turno 2: <code id="pvIn2">16:05</code> (inicio + <span id="pvInMin2">5</span> min)</li>
-            <li>Fichaje abierto &gt; <span id="pvOpenMin">15</span> min → ejemplo: <code id="pvOpenEx">16:15</code></li>
-            <li>Fin turno 1 + margen: <code id="pvEnd1">14:05</code></li>
-            <li>Fin turno 2 + margen: <code id="pvEnd2">20:05</code></li>
-          </ul>
+            <button id="btnAskPerms" class="btn btn-outline-secondary" type="button">
+                <i class="fas fa-mobile-alt me-1"></i> Pedir permiso & activar push
+            </button>
+
+            <button id="btnTest" class="btn btn-outline-success" type="button">
+                <i class="fas fa-paper-plane me-1"></i> Enviar prueba
+            </button>
         </div>
-      </div>
-    </div>
-  </div>
+
+        <p class="mt-2 small text-muted">
+            VAPID:
+            <code id="vapid">{{ vapid_public or 'NO CONFIGURADO' }}</code>
+        </p>
+    </form>
 </div>
+{% endblock %}
 
-<!-- Pequeño JS para la vista previa y test -->
+{% block scripts %}
 <script>
-  function addMinutes(hhmm, add) {
-    const [h, m] = hhmm.split(':').map(Number);
-    const d = new Date(2000,0,1,h,m,0);
-    d.setMinutes(d.getMinutes() + Number(add || 0));
-    const hh = String(d.getHours()).padStart(2,'0');
-    const mm = String(d.getMinutes()).padStart(2,'0');
-    return `${hh}:${mm}`;
-  }
-  function updatePreview() {
-    const inMin = document.getElementById('minutes_after_start_no_entry')?.value || 5;
-    const openMin = document.getElementById('open_record_minutes')?.value || 15;
-    const endMin = document.getElementById('end_passed_minutes')?.value || 5;
+    const VAPID_PUBLIC_KEY = document.getElementById('vapid').textContent.trim();
 
-    document.getElementById('pvInMin').textContent = inMin;
-    document.getElementById('pvInMin2').textContent = inMin;
-    document.getElementById('pvOpenMin').textContent = openMin;
-
-    document.getElementById('pvIn1').textContent = addMinutes('08:00', inMin);
-    document.getElementById('pvIn2').textContent = addMinutes('16:00', inMin);
-    document.getElementById('pvOpenEx').textContent = addMinutes('16:00', openMin);
-    document.getElementById('pvEnd1').textContent = addMinutes('14:00', endMin);
-    document.getElementById('pvEnd2').textContent = addMinutes('20:00', endMin);
-  }
-  ['minutes_after_start_no_entry','open_record_minutes','end_passed_minutes'].forEach(id=>{
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', updatePreview);
-  });
-  updatePreview();
-
-  // Estado simple (si ya tenías lógica más completa, puedes mantenerla)
-  function setBadge(el, okText, badText, ok) {
-    el.textContent = ok ? okText : badText;
-    el.className = 'badge ' + (ok ? 'bg-success' : 'bg-secondary');
-  }
-  document.addEventListener('DOMContentLoaded', () => {
-    try {
-      setBadge(document.getElementById('stPerm'),
-        Notification.permission, Notification.permission, Notification.permission === 'granted');
-    } catch(_) {}
-    setBadge(document.getElementById('stSW'), 'Activo', '—', ('serviceWorker' in navigator));
-    // La suscripción real depende de tu lógica de suscripción JS
-    setBadge(document.getElementById('stSub'), 'Suscrito', '—', false);
-  });
-
-  // Botón de prueba: ajusta la URL si tu ruta es distinta
-  document.getElementById('btnTestPush')?.addEventListener('click', async ()=>{
-    try {
-      const r = await fetch('/api/push_test');
-      const j = await r.json();
-      alert(j.ok ? '✔️ Notificación enviada' : '❌ No se pudo enviar');
-    } catch(e) {
-      alert('❌ Error al probar la notificación');
+    async function urlB64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
     }
-  });
+
+    async function ensureSW() {
+        if (!('serviceWorker' in navigator)) {
+            throw new Error('SW no soportado');
+        }
+        // registra y espera a que esté listo
+        const reg = await navigator.serviceWorker.register('/sw.js');
+        await navigator.serviceWorker.ready;
+        return reg;
+    }
+
+    async function subscribe() {
+        if (!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY === 'NO CONFIGURADO') {
+            alert('Configura las claves VAPID en el servidor.');
+            return;
+        }
+
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+            alert('Permiso denegado.');
+            return;
+        }
+
+        const reg = await ensureSW();
+
+        const sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: await urlB64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+
+        await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(sub)
+        });
+
+        alert('Push activado ✅');
+    }
+
+    document.getElementById('btnAskPerms')?.addEventListener('click', subscribe);
+
+    document.getElementById('btnTest')?.addEventListener('click', async () => {
+        const r = await fetch('/api/push/test', { method: 'POST' });
+        const j = await r.json();
+        alert(j.ok ? 'Enviada ✅' : 'Fallo ❌');
+    });
 </script>
 {% endblock %}
