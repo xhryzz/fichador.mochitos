@@ -94,26 +94,63 @@ def verify_token(token, expiration=86400):
         return user_id
     except:
         return None
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import os
 
 def send_setup_password_email(user):
-    """Envía correo con enlace para configurar contraseña usando Resend"""
+    """Envía correo con enlace para configurar contraseña usando Gmail SMTP"""
     try:
         if not user or not user.email:
             print("❌ No se pudo enviar el correo: usuario o email inválido")
             return False
 
-        print(f"🚀 Enviando correo con Resend a: {user.email}")
+        print(f"🚀 Enviando correo con Gmail SMTP a: {user.email}")
 
-        # Verificar que Resend está configurado
-        if not resend.api_key:
-            print("❌ RESEND_API_KEY no configurada")
+        # Configuración de Gmail
+        smtp_server = "smtp.gmail.com"
+        port = 587
+        sender_email = os.environ.get('GMAIL_EMAIL')  # Tu email de Gmail
+        password = os.environ.get('GMAIL_APP_PASSWORD')  # Contraseña de aplicación
+
+        if not sender_email or not password:
+            print("❌ GMAIL_EMAIL o GMAIL_APP_PASSWORD no configuradas")
             return False
 
         token = generate_token(user.id)
         setup_url = url_for('set_first_password_token', token=token, _external=True)
 
-        # HTML moderno y responsive
-        html_content = f'''
+        # Crear mensaje
+        message = MIMEMultipart("alternative")
+        message["Subject"] = "Configura tu contraseña - Fichador"
+        message["From"] = f"Fichador <{sender_email}>"
+        message["To"] = user.email
+
+        # Versión texto
+        text = f"""\
+        Fichador - Configura tu contraseña
+
+        Hola {user.name},
+
+        Se ha creado una cuenta para ti en Fichador.
+
+        Para configurar tu contraseña, visita este enlace:
+        {setup_url}
+
+        Este enlace es válido por 24 horas.
+
+        Tus datos:
+        - Email: {user.email}
+        - Horas requeridas: {user.total_hours_required} horas
+
+        Si no solicitaste esta cuenta, ignora este mensaje.
+
+        --
+        Equipo Fichador"""
+
+        # Versión HTML
+        html = f"""\
         <!DOCTYPE html>
         <html>
         <head>
@@ -128,7 +165,6 @@ def send_setup_password_email(user):
                     max-width: 600px;
                     margin: 0 auto;
                     padding: 20px;
-                    background-color: #f8f9fa;
                 }}
                 .container {{
                     background: white;
@@ -149,14 +185,6 @@ def send_setup_password_email(user):
                     color: #007AFF;
                     margin-bottom: 8px;
                 }}
-                .welcome {{
-                    font-size: 20px;
-                    color: #1f2937;
-                    margin-bottom: 10px;
-                }}
-                .content {{
-                    margin: 30px 0;
-                }}
                 .button {{
                     display: inline-block;
                     background: #007AFF;
@@ -167,25 +195,6 @@ def send_setup_password_email(user):
                     font-weight: 600;
                     font-size: 16px;
                     margin: 20px 0;
-                    text-align: center;
-                }}
-                .details {{
-                    background: #f8fafc;
-                    padding: 20px;
-                    border-radius: 8px;
-                    margin: 25px 0;
-                    font-size: 14px;
-                }}
-                .info-item {{
-                    margin: 8px 0;
-                }}
-                .footer {{
-                    text-align: center;
-                    margin-top: 30px;
-                    color: #6b7280;
-                    font-size: 14px;
-                    border-top: 1px solid #e1e5e9;
-                    padding-top: 20px;
                 }}
                 .alert {{
                     background: #eff6ff;
@@ -193,7 +202,6 @@ def send_setup_password_email(user):
                     border-radius: 8px;
                     padding: 16px;
                     margin: 20px 0;
-                    text-align: center;
                 }}
             </style>
         </head>
@@ -201,82 +209,48 @@ def send_setup_password_email(user):
             <div class="container">
                 <div class="header">
                     <div class="logo">Fichador</div>
-                    <div class="welcome">Bienvenido, {user.name}</div>
+                    <div style="font-size: 20px; color: #1f2937;">Bienvenido, {user.name}</div>
                 </div>
-
-                <div class="content">
-                    <p>Se ha creado una cuenta para ti en Fichador. Para comenzar a usar la plataforma, configura tu contraseña.</p>
-
-                    <div style="text-align: center;">
-                        <a href="{setup_url}" class="button">
-                            Configurar Contraseña
-                        </a>
-                    </div>
-
-                    <div class="alert">
-                        <strong>⚠️ Importante:</strong> Este enlace es válido por 24 horas.
-                    </div>
-
-                    <div class="details">
-                        <div class="info-item"><strong>📧 Email:</strong> {user.email}</div>
-                        <div class="info-item"><strong>⏰ Horas requeridas:</strong> {user.total_hours_required} horas</div>
-                    </div>
-
-                    <p style="color: #6b7280; font-size: 14px;">
-                        Si no solicitaste esta cuenta, puedes ignorar este mensaje de forma segura.
-                    </p>
+                <p>Se ha creado una cuenta para ti en Fichador. Para comenzar a usar la plataforma, configura tu contraseña.</p>
+                <div style="text-align: center;">
+                    <a href="{setup_url}" class="button">Configurar Contraseña</a>
                 </div>
-
-                <div class="footer">
+                <div class="alert">
+                    <strong>⚠️ Importante:</strong> Este enlace es válido por 24 horas.
+                </div>
+                <div style="background: #f8fafc; padding: 20px; border-radius: 8px;">
+                    <div><strong>📧 Email:</strong> {user.email}</div>
+                    <div><strong>⏰ Horas requeridas:</strong> {user.total_hours_required} horas</div>
+                </div>
+                <div style="text-align: center; margin-top: 30px; color: #6b7280;">
                     <p>Equipo Fichador</p>
-                    <p>Este es un mensaje automático</p>
                 </div>
             </div>
         </body>
         </html>
-        '''
+        """
 
-        # Versión texto plano
-        text_content = f'''
-        Fichador - Configura tu contraseña
+        # Convertir a MIMEText objects
+        part1 = MIMEText(text, "plain")
+        part2 = MIMEText(html, "html")
 
-        Hola {user.name},
+        # Add HTML/plain-text parts to MIMEMultipart message
+        message.attach(part1)
+        message.attach(part2)
 
-        Se ha creado una cuenta para ti en Fichador.
+        # Create secure connection with server and send email
+        server = smtplib.SMTP(smtp_server, port)
+        server.starttls()
+        server.login(sender_email, password)
+        server.sendmail(sender_email, user.email, message.as_string())
+        server.quit()
 
-        Para configurar tu contraseña, visita este enlace:
-        {setup_url}
-
-        Este enlace es válido por 24 horas.
-
-        Tus datos:
-        - Email: {user.email}
-        - Horas requeridas: {user.total_hours_required} horas
-
-        Si no solicitaste esta cuenta, ignora este mensaje.
-
-        --
-        Equipo Fichador
-        '''
-
-        # Enviar con Resend
-        params = {
-            "from": "Fichador <onboarding@resend.dev>",
-            "to": [user.email],
-            "subject": "Configura tu contraseña - Fichador",
-            "html": html_content,
-            "text": text_content
-        }
-
-        response = resend.Emails.send(params)
-
-        print(f"✅ Correo enviado exitosamente con Resend")
-        print(f"   ID: {response['id']}")
+        print(f"✅ Correo enviado exitosamente con Gmail SMTP")
         print(f"   Para: {user.email}")
         return True
 
     except Exception as e:
-        print(f"❌ Error al enviar correo con Resend: {str(e)}")
+        print(f"❌ Error al enviar correo con Gmail SMTP: {str(e)}")
         import traceback
         print(f"🔍 Traceback: {traceback.format_exc()}")
         return False
