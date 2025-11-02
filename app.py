@@ -1,4 +1,5 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, abort
+
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -1266,6 +1267,89 @@ def init_db():
         print("✅ Base de datos inicializada correctamente")
 
 
+# ======== HELPERS DE JOBS (reutilizables por POST y por CRON GET) ========
+def _job_notify_due_clockin(now=None):
+    now = now or now_local()
+    users = User.query.all()
+    sent = 0
+    for u in users:
+        s = NotificationSettings.query.filter_by(user_id=u.id).first()
+        if not (s and s.push_enabled):
+            continue
+        sch = today_schedule_for(u, now)
+        if not sch:
+            continue
+
+        planned_dt = datetime.combine(now.date(), sch.start_time, tzinfo=ZONE)
+        if now >= planned_dt + timedelta(minutes=s.minutes_after_start_no_entry):
+            has_entry = TimeRecord.query.filter_by(user_id=u.id, date=now.date()).first()
+            if not has_entry and s.last_missed_entry_sent != now.date():
+                ok = send_push_to_user(
+                    u,
+                    "⏰ No has fichado y ya es hora",
+                    f"Tenías entrada a las {sch.start_time.strftime('%H:%M')}."
+                )
+                if ok:
+                    s.last_missed_entry_sent = now.date()
+                    db.session.commit()
+                    sent += 1
+    return sent
+
+def _job_notify_open_record(now=None):
+    now = now or now_local()
+    users = User.query.all()
+    sent = 0
+    for u in users:
+        s = NotificationSettings.query.filter_by(user_id=u.id).first()
+        if not (s and s.push_enabled):
+            continue
+        rec = active_record_for_today(u)
+        if not rec:
+            continue
+
+        should = False
+        # 1) Fichaje abierto más de X minutos
+        diff_secs = (now - rec.entry_time.replace(tzinfo=ZONE)).total_seconds()
+        if diff_secs >= s.open_record_minutes * 60:
+            should = True
+
+        # 2) Pasó hora fin + X
+        sch = today_schedule_for(u, now)
+        if sch:
+            end_dt = datetime.combine(now.date(), sch.end_time, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
+            if now >= end_dt:
+                should = True
+
+        if should and s.last_open_record_sent != now.date():
+            ok = send_push_to_user(
+                u, "🕒 Tienes un fichaje abierto",
+                "¿Se te ha pasado cerrar? Revísalo cuando puedas."
+            )
+            if ok:
+                s.last_open_record_sent = now.date()
+                db.session.commit()
+                sent += 1
+    return sent
+
+def _job_weekly_summary(now=None):
+    now = now or now_local()
+    users = User.query.all()
+    sent = 0
+    for u in users:
+        s = NotificationSettings.query.filter_by(user_id=u.id).first()
+        if not (s and s.push_enabled):
+            continue
+        if now.weekday() == s.weekly_summary_day and now.time() >= s.weekly_summary_time and s.last_weekly_sent != now.date():
+            total_required = u.total_hours_required or 150.0
+            done = hours_worked_total(u)
+            remaining = max(total_required - done, 0)
+            msg = f"Te quedan {remaining:.1f} h para finalizar las prácticas (hechas {done:.1f}/{total_required:.1f})."
+            if send_push_to_user(u, "📊 Resumen semanal", msg):
+                s.last_weekly_sent = now.date()
+                db.session.commit()
+                sent += 1
+    return sent
+# ========================================================================
 
 
 @app.route('/admin/test-mail')
@@ -1360,84 +1444,19 @@ def api_push_test():
 @app.post('/tasks/notify_due_clockin')
 @require_tasks_token
 def task_notify_due_clockin():
-    now = now_local()
-    users = User.query.all()
-    count = 0
-    for u in users:
-        s = NotificationSettings.query.filter_by(user_id=u.id).first()
-        if not (s and s.push_enabled):
-            continue
-        sch = today_schedule_for(u, now)
-        if not sch:
-            continue
-
-        # Hora planificada + margen
-        planned_dt = datetime.combine(now.date(), sch.start_time, tzinfo=ZONE)
-        if now >= planned_dt + timedelta(minutes=s.minutes_after_start_no_entry):
-            has_entry = TimeRecord.query.filter_by(user_id=u.id, date=now.date()).first()
-            if not has_entry and s.last_missed_entry_sent != now.date():
-                if send_push_to_user(u, "⏰ No has fichado y ya es hora",
-                                     f"Tenías entrada a las {sch.start_time.strftime('%H:%M')}."):
-                    s.last_missed_entry_sent = now.date()
-                    db.session.commit()
-                    count += 1
+    count = _job_notify_due_clockin()
     return jsonify({"sent": count})
 
 @app.post('/tasks/notify_open_record')
 @require_tasks_token
 def task_notify_open_record():
-    now = now_local()
-    users = User.query.all()
-    count = 0
-    for u in users:
-        s = NotificationSettings.query.filter_by(user_id=u.id).first()
-        if not (s and s.push_enabled):
-            continue
-        rec = active_record_for_today(u)
-        if not rec:
-            continue
-
-        should = False
-        # 1) Fichaje abierto más de X minutos
-        if (now - rec.entry_time.replace(tzinfo=ZONE)).total_seconds() >= s.open_record_minutes*60:
-            should = True
-
-        # 2) Se pasó la hora fin + X si hay horario hoy
-        sch = today_schedule_for(u, now)
-        if sch:
-            end_dt = datetime.combine(now.date(), sch.end_time, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
-            if now >= end_dt:
-                should = True
-
-        if should and s.last_open_record_sent != now.date():
-            if send_push_to_user(u, "🕒 Tienes un fichaje abierto",
-                                 "¿Se te ha pasado cerrar? Revísalo cuando puedas."):
-                s.last_open_record_sent = now.date()
-                db.session.commit()
-                count += 1
+    count = _job_notify_open_record()
     return jsonify({"sent": count})
 
 @app.post('/tasks/weekly_summary')
 @require_tasks_token
 def task_weekly_summary():
-    now = now_local()
-    users = User.query.all()
-    count = 0
-    for u in users:
-        s = NotificationSettings.query.filter_by(user_id=u.id).first()
-        if not (s and s.push_enabled):
-            continue
-
-        # ¿Es el día/hora configurado y no enviado ya hoy?
-        if now.weekday() == s.weekly_summary_day and now.time() >= s.weekly_summary_time and s.last_weekly_sent != now.date():
-            total_required = u.total_hours_required or 150.0
-            done = hours_worked_total(u)
-            remaining = max(total_required - done, 0)
-            msg = f"Te quedan {remaining:.1f} h para finalizar las prácticas (hechas {done:.1f}/{total_required:.1f})."
-            if send_push_to_user(u, "📊 Resumen semanal", msg):
-                s.last_weekly_sent = now.date()
-                db.session.commit()
-                count += 1
+    count = _job_weekly_summary()
     return jsonify({"sent": count})
 
 @bp.get('/run-tick')
@@ -1460,6 +1479,35 @@ def run_weekly_endpoint():
     except Exception as e:
         current_app.logger.exception("run_weekly_summaries failed")
         return jsonify(error="run_weekly_summaries failed", detail=str(e)), 500
+
+
+# ======== CRON GET (con token por query) ========
+def _check_cron_token():
+    token_req = request.args.get('token') or request.headers.get('X-CRON-TOKEN')
+    if not TASKS_TOKEN or token_req != TASKS_TOKEN:
+        abort(403)
+
+@app.get('/tasks/run-tick')
+def tasks_run_tick():
+    _check_cron_token()
+    try:
+        due = _job_notify_due_clockin()
+        open_ = _job_notify_open_record()
+        return jsonify(ok=True, due_clockin=due, open_record=open_)
+    except Exception as e:
+        app.logger.exception("run-tick failed")
+        return jsonify(ok=False, error=str(e)), 500
+
+@app.get('/tasks/run-weekly')
+def tasks_run_weekly():
+    _check_cron_token()
+    try:
+        weekly = _job_weekly_summary()
+        return jsonify(ok=True, weekly=weekly)
+    except Exception as e:
+        app.logger.exception("run-weekly failed")
+        return jsonify(ok=False, error=str(e)), 500
+# ================================================
 
 # En desarrollo local
 if __name__ == '__main__':
