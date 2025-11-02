@@ -372,8 +372,8 @@ def send_push_to_user(user, title, body, data=None, actions=None):
     return ok_any
 
 # Pequeñas migraciones automáticas (SQLite)
+# Pequeñas migraciones automáticas (SQLite/PostgreSQL)
 def upgrade_db():
-    # Pequeñas migraciones automáticas según motor
     from sqlalchemy import text
     with app.app_context():
         dialect = _db_dialect()
@@ -394,20 +394,25 @@ def upgrade_db():
             if "last_missed_entry_sent_2" not in names:
                 db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_2 DATE NULL"))
 
-                       elif dialect == "postgresql":
-                            # --- PostgreSQL (usa ALTER IF NOT EXISTS) ---
-                            stmts = [
-                                "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS start_time_2 TIME NULL",
-                                "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS end_time_2 TIME NULL",
-                                "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_1 DATE NULL",
-                                "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_2 DATE NULL",
-                            ]
-                            for s in stmts:
-                                try:
-                                    db.session.execute(text(s))
-                                except Exception as e:
-                                    print(f"⚠️ upgrade_db postgres: {e}")
+            # En SQLite el tamaño de VARCHAR no se aplica realmente, así que no hace falta ALTER para password/email
+            db.session.commit()
 
+        elif dialect == "postgresql":
+            # --- PostgreSQL ---
+            # OJO: "user" es palabra reservada, por eso va entre comillas dobles.
+            stmts = [
+                'ALTER TABLE "user" ALTER COLUMN password TYPE VARCHAR(255)',
+                'ALTER TABLE "user" ALTER COLUMN email TYPE VARCHAR(255)',
+                "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS start_time_2 TIME NULL",
+                "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS end_time_2 TIME NULL",
+                "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_1 DATE NULL",
+                "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_2 DATE NULL",
+            ]
+            for s in stmts:
+                try:
+                    db.session.execute(text(s))
+                except Exception as e:
+                    print(f"⚠️ upgrade_db postgres: {e}")
             db.session.commit()
 
 
