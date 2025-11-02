@@ -171,13 +171,14 @@ def hours_worked_total(user):
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(100), unique=True, nullable=False)
-    password = db.Column(db.String(100), nullable=True)
+    password = db.Column(db.String(255), nullable=True)  # <-- antes 100
     name = db.Column(db.String(100), nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
     is_first_login = db.Column(db.Boolean, default=True)
     total_hours_required = db.Column(db.Float, default=150.0)
     schedules = db.relationship('Schedule', backref='user', lazy=True)
     time_records = db.relationship('TimeRecord', backref='user', lazy=True)
+
 
 class Schedule(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -393,22 +394,24 @@ def upgrade_db():
             if "last_missed_entry_sent_2" not in names:
                 db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_2 DATE NULL"))
 
+                       elif dialect == "postgresql":
+                            # --- PostgreSQL (usa ALTER IF NOT EXISTS) ---
+                            stmts = [
+                                "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS start_time_2 TIME NULL",
+                                "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS end_time_2 TIME NULL",
+                                "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_1 DATE NULL",
+                                "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_2 DATE NULL",
+                            ]
+                            for s in stmts:
+                                try:
+                                    db.session.execute(text(s))
+                                except Exception as e:
+                                    print(f"⚠️ upgrade_db postgres: {e}")
+
             db.session.commit()
 
-        elif dialect == "postgresql":
-            # --- PostgreSQL (usa ALTER IF NOT EXISTS) ---
-            stmts = [
-                "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS start_time_2 TIME NULL",
-                "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS end_time_2 TIME NULL",
-                "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_1 DATE NULL",
-                "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_2 DATE NULL",
-            ]
-            for s in stmts:
-                try:
-                    db.session.execute(text(s))
-                except Exception as e:
-                    print(f"⚠️ upgrade_db postgres: {e}")
-            db.session.commit()
+
+
 
 # ==========================
 # Contexto Jinja
