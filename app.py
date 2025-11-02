@@ -1347,7 +1347,7 @@ def init_db():
 # ==========================
 # Jobs (notificaciones)
 # ==========================
-ddef _job_notify_due_clockin(now=None, force=False):
+def _job_notify_due_clockin(now=None, force=False):
      now = now or now_local()
      users = User.query.all()
      sent = 0
