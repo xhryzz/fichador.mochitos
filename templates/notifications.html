@@ -1,14 +1,73 @@
 {% extends "base.html" %}
 {% block title %}Notificaciones{% endblock %}
 
+{# ─────────────────────────────────────────────────────────────────────────────
+Metadato con la VAPID pública para que notifications.js pueda leerla
+incluso si se carga antes que este bloque.
+───────────────────────────────────────────────────────────────────────────── #}
+{% block head_extra %}
+<meta name="vapid-public" content="{{ vapid_public or '' }}">
+{% endblock %}
+
 {% block content %}
 <div class="container py-4">
     <h1 class="mb-3"><i class="fas fa-bell me-2"></i> Notificaciones</h1>
 
     <div class="alert alert-info">
-        <strong>Consejo:</strong> En iPhone debes “Añadir a pantalla de inicio” para recibir push. En todos los casos, el sitio debe estar con HTTPS.
+        <strong>Consejo:</strong> En iPhone debes “<em>Añadir a pantalla de inicio</em>”
+        para recibir notificaciones push. Asegúrate de tener HTTPS y de abrir la PWA instalada,
+        no solo Safari. En Android/desktop basta con dar permiso.
     </div>
 
+    <!-- Estado rápido -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <strong>PWA instalada</strong>
+                        <span id="stPwa" class="badge bg-secondary">—</span>
+                    </div>
+                    <small class="text-muted">Requisito en iOS para Web Push.</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <strong>Permiso</strong>
+                        <span id="stPerm" class="badge bg-secondary">—</span>
+                    </div>
+                    <small class="text-muted">Estado de Notification API.</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <strong>Service Worker</strong>
+                        <span id="stSW" class="badge bg-secondary">—</span>
+                    </div>
+                    <small class="text-muted">/sw.js registrado y listo.</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <strong>Suscripción Push</strong>
+                        <span id="stSub" class="badge bg-secondary">—</span>
+                    </div>
+                    <small class="text-muted">PushManager.getSubscription().</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ajustes guardados en BD (activan la lógica de tus CRON/tareas) -->
     <form method="POST" class="card p-3 mb-4">
         <div class="form-check form-switch mb-3">
             <input
@@ -18,7 +77,7 @@
                     name="push_enabled"
                     {% if settings and settings.push_enabled %}checked{% endif %}
             >
-            <label class="form-check-label" for="push_enabled">Activar notificaciones push</label>
+            <label class="form-check-label" for="push_enabled">Activar notificaciones push (en servidor)</label>
         </div>
 
         <div class="row g-3">
@@ -48,7 +107,7 @@
                         type="number"
                         class="form-control"
                         name="end_passed_minutes"
-                        value="{{ settings.end_passed_minutes if settings else 15 }}"
+                        value="{{ settings.end_passed_minutes if settings else 5 }}"
                 >
             </div>
 
@@ -73,7 +132,7 @@
                         type="time"
                         class="form-control"
                         name="weekly_summary_time"
-                        value="{% if settings and settings.weekly_summary_time %}{{ settings.weekly_summary_time.strftime('%H:%M') }}{% else %}19:00{% endif %}"
+                        value="{% if settings and settings.weekly_summary_time %}{{ settings.weekly_summary_time.strftime('%H:%M') }}{% else %}18:00{% endif %}"
                 >
             </div>
         </div>
@@ -83,82 +142,92 @@
                 <i class="fas fa-save me-1"></i> Guardar
             </button>
 
-            <button id="btnAskPerms" class="btn btn-outline-secondary" type="button">
-                <i class="fas fa-mobile-alt me-1"></i> Pedir permiso & activar push
+            <!-- Botones que actúan en el navegador/cliente -->
+            <button class="btn btn-outline-secondary" type="button" data-nm-action="enable">
+                <i class="fas fa-mobile-alt me-1"></i> Pedir permiso & activar push (cliente)
             </button>
 
-            <button id="btnTest" class="btn btn-outline-success" type="button">
+            <button class="btn btn-outline-success" type="button" data-nm-action="test">
                 <i class="fas fa-paper-plane me-1"></i> Enviar prueba
+            </button>
+
+            <button class="btn btn-outline-danger" type="button" data-nm-action="disable">
+                <i class="fas fa-bell-slash me-1"></i> Desactivar push (cliente)
             </button>
         </div>
 
-        <p class="mt-2 small text-muted">
-            VAPID:
+        <p class="mt-2 small text-muted mb-0">
+            VAPID pública:
             <code id="vapid">{{ vapid_public or 'NO CONFIGURADO' }}</code>
         </p>
     </form>
+
+    <div class="alert alert-secondary">
+        <ul class="mb-0">
+            <li>El interruptor de arriba guarda tu preferencia en el servidor (para que los <em>cron</em> envíen avisos).</li>
+            <li>Los botones “activar/desactivar/test” gestionan la suscripción en ESTE dispositivo/navegador.</li>
+            <li>Si usas iPhone: instala la PWA (Compartir → Añadir a pantalla de inicio), abre la PWA y activa ahí las notificaciones.</li>
+        </ul>
+    </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
+{# Expón también la VAPID pública en window por si el JS la necesita #}
 <script>
-    const VAPID_PUBLIC_KEY = document.getElementById('vapid').textContent.trim();
+    window.VAPID_PUBLIC_KEY = "{{ vapid_public|default('', true) }}";
+</script>
 
-    async function urlB64ToUint8Array(base64String) {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-        const rawData = atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) {
-            outputArray[i] = rawData.charCodeAt(i);
-        }
-        return outputArray;
+<script>
+    // Sincroniza la clave por si notifications.js ya cargó
+    if (window.notificationManager && window.VAPID_PUBLIC_KEY) {
+        window.notificationManager.vapidPublicKey = window.VAPID_PUBLIC_KEY;
     }
 
-    async function ensureSW() {
-        if (!('serviceWorker' in navigator)) {
-            throw new Error('SW no soportado');
+    // Pinta el estado visual (PWA, permiso, SW, subscripción)
+    (async function paintStatus() {
+        const badge = (id, txt, ok) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = txt;
+            el.classList.remove('bg-secondary','bg-success','bg-danger','bg-warning');
+            el.classList.add(ok ? 'bg-success' : 'bg-danger');
+        };
+
+        // PWA instalada
+        const isStandalone =
+            (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+            (window.navigator.standalone === true); // iOS Safari
+        badge('stPwa', isStandalone ? 'Sí' : 'No', isStandalone);
+
+        // Permisos
+        if ('Notification' in window) {
+            const perm = Notification.permission; // default | granted | denied
+            const ok = perm === 'granted';
+            badge('stPerm', perm, ok);
+        } else {
+            badge('stPerm', 'No soportado', false);
         }
-        // registra y espera a que esté listo
-        const reg = await navigator.serviceWorker.register('/sw.js');
-        await navigator.serviceWorker.ready;
-        return reg;
-    }
 
-    async function subscribe() {
-        if (!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY === 'NO CONFIGURADO') {
-            alert('Configura las claves VAPID en el servidor.');
-            return;
+        // SW & Sub
+        if ('serviceWorker' in navigator) {
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                badge('stSW', 'Listo', true);
+                if ('pushManager' in reg) {
+                    const sub = await reg.pushManager.getSubscription();
+                    badge('stSub', sub ? 'Suscrito' : 'No suscrito', !!sub);
+                } else {
+                    badge('stSub', 'No soportado', false);
+                }
+            } catch {
+                badge('stSW', 'No listo', false);
+                badge('stSub', '—', false);
+            }
+        } else {
+            badge('stSW', 'No soportado', false);
+            badge('stSub', '—', false);
         }
-
-        const perm = await Notification.requestPermission();
-        if (perm !== 'granted') {
-            alert('Permiso denegado.');
-            return;
-        }
-
-        const reg = await ensureSW();
-
-        const sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: await urlB64ToUint8Array(VAPID_PUBLIC_KEY)
-        });
-
-        await fetch('/api/push/subscribe', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(sub)
-        });
-
-        alert('Push activado ✅');
-    }
-
-    document.getElementById('btnAskPerms')?.addEventListener('click', subscribe);
-
-    document.getElementById('btnTest')?.addEventListener('click', async () => {
-        const r = await fetch('/api/push/test', { method: 'POST' });
-        const j = await r.json();
-        alert(j.ok ? 'Enviada ✅' : 'Fallo ❌');
-    });
+    })();
 </script>
 {% endblock %}
