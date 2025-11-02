@@ -53,6 +53,19 @@
                                                required>
                                     </div>
 
+                                    <div class="mb-2">
+                                        <label class="form-label small">Entrada (turno 2, opcional)</label>
+                                        <input type="time" class="form-control form-control-sm"
+                                               name="start_time_2"
+                                               value="{{ schedule.start_time_2.strftime('%H:%M') if schedule and schedule.start_time_2 else '' }}">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label small">Salida (turno 2, opcional)</label>
+                                        <input type="time" class="form-control form-control-sm"
+                                               name="end_time_2"
+                                               value="{{ schedule.end_time_2.strftime('%H:%M') if schedule and schedule.end_time_2 else '' }}">
+                                    </div>
+
                                     <div class="form-check mb-2">
                                         <input class="form-check-input" type="checkbox"
                                                name="is_active" id="active_{{ day_num }}"
