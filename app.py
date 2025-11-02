@@ -1549,15 +1549,14 @@ def api_push_subscribe():
     return jsonify({"ok": True})
 
 
- from flask import jsonify
- from flask_login import login_required, current_user
-
- @app.post('/me/send-weekly-now')
- @login_required
+@app.post('/me/send-weekly-now')
+@login_required
  def me_send_weekly_now():
      # Lanza el job sólo para el usuario actual y forzando envío
      sent = _job_weekly_summary(force=True, user_id=current_user.id)
      return jsonify(ok=True, sent=sent)
+
+     
 @app.post('/api/push/unsubscribe')
 @login_required
 def api_push_unsubscribe():
