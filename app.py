@@ -102,15 +102,6 @@ def send_setup_password_email(user):
             print("❌ No se pudo enviar el correo: usuario o email inválido")
             return False
 
-        # 🔧 SOLUCIÓN TEMPORAL: Redirigir a admin para testing
-        original_email = user.email
-        admin_email = "christianconhr@gmail.com"
-
-        # Si no es el admin, redirigir temporalmente
-        if user.email != admin_email:
-            print(f"🔄 Modo testing: Redirigiendo correo de {user.email} a {admin_email}")
-            user.email = admin_email  # Temporalmente cambiar el email
-
         print(f"🚀 Enviando correo con Resend a: {user.email}")
 
         # Verificar que Resend está configurado
@@ -121,7 +112,7 @@ def send_setup_password_email(user):
         token = generate_token(user.id)
         setup_url = url_for('set_first_password_token', token=token, _external=True)
 
-        # HTML del correo (mantener igual)
+        # HTML moderno y responsive
         html_content = f'''
         <!DOCTYPE html>
         <html>
@@ -204,15 +195,6 @@ def send_setup_password_email(user):
                     margin: 20px 0;
                     text-align: center;
                 }}
-                .testing-notice {{
-                    background: #fff3cd;
-                    border: 1px solid #ffc107;
-                    border-radius: 8px;
-                    padding: 16px;
-                    margin: 20px 0;
-                    text-align: center;
-                    color: #856404;
-                }}
             </style>
         </head>
         <body>
@@ -223,8 +205,6 @@ def send_setup_password_email(user):
                 </div>
 
                 <div class="content">
-                    {"<div class='testing-notice'><strong>🚧 MODO PRUEBA:</strong> En producción, este correo sería enviado a <strong>" + original_email + "</strong></div>" if original_email != user.email else ""}
-
                     <p>Se ha creado una cuenta para ti en Fichador. Para comenzar a usar la plataforma, configura tu contraseña.</p>
 
                     <div style="text-align: center;">
@@ -238,8 +218,7 @@ def send_setup_password_email(user):
                     </div>
 
                     <div class="details">
-                        <div class="info-item"><strong>📧 Email:</strong> {original_email}</div>
-                        <div class="info-item"><strong>👤 Nombre:</strong> {user.name}</div>
+                        <div class="info-item"><strong>📧 Email:</strong> {user.email}</div>
                         <div class="info-item"><strong>⏰ Horas requeridas:</strong> {user.total_hours_required} horas</div>
                     </div>
 
@@ -271,8 +250,7 @@ def send_setup_password_email(user):
         Este enlace es válido por 24 horas.
 
         Tus datos:
-        - Email: {original_email}
-        - Nombre: {user.name}
+        - Email: {user.email}
         - Horas requeridas: {user.total_hours_required} horas
 
         Si no solicitaste esta cuenta, ignora este mensaje.
@@ -295,11 +273,6 @@ def send_setup_password_email(user):
         print(f"✅ Correo enviado exitosamente con Resend")
         print(f"   ID: {response['id']}")
         print(f"   Para: {user.email}")
-
-        # Restaurar el email original si fue cambiado
-        if original_email != user.email:
-            user.email = original_email
-
         return True
 
     except Exception as e:
@@ -881,7 +854,7 @@ def test_resend():
             return redirect(url_for('admin'))
 
         params = {
-            "from": "Fichador <onboarding@resend.dev>",
+            "from": "Fichador <noreply@fichador-mochitos.onrender.com>",  # ← TU DOMINIO VERIFICADO
             "to": [current_user.email],
             "subject": "Prueba de Resend - Fichador",
             "html": """
