@@ -82,3 +82,32 @@ self.addEventListener('notificationclick', event => {
     );
   }
 });
+
+
+// Escuchar eventos push
+self.addEventListener('push', (event) => {
+    let data = {};
+    try { data = event.data ? event.data.json() : {}; } catch(e) {}
+
+    const title = data.title || 'Notificación';
+    const options = {
+        body: data.body || '',
+        icon: data.icon || '/static/icon-192x192.png',
+        badge: data.badge || '/static/icon-72x72.png',
+        data: data.data || {},
+        actions: data.actions || [{action:'fichar', title:'Abrir fichador'}]
+    };
+
+    event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+    event.notification.close();
+    const url = '/dashboard';
+    event.waitUntil(clients.matchAll({ type: 'window' }).then(windowClients => {
+        for (const client of windowClients) {
+            if (client.url.includes(url) && 'focus' in client) return client.focus();
+        }
+        if (clients.openWindow) return clients.openWindow(url);
+    }));
+});

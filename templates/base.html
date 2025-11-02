@@ -74,6 +74,12 @@
                         <span>Informes</span>
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'notifications' }}" href="{{ url_for('notifications') }}">
+                        <i class="fas fa-bell"></i>
+                        <span>Notificaciones</span>
+                    </a>
+                </li>
                 {% if current_user.is_admin %}
                 <li class="nav-item">
                     <a class="nav-link {{ 'active' if request.endpoint == 'admin' }} text-warning" href="{{ url_for('admin') }}">

@@ -17,6 +17,8 @@ from reportlab.lib import colors
 from reportlab.lib.units import cm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from pywebpush import webpush, WebPushException
+from zoneinfo import ZoneInfo
 
 
 app = Flask(__name__)
@@ -47,6 +49,18 @@ login_manager.login_view = 'login'
 
 # Serializer para generar tokens seguros
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+
+TZ = os.environ.get('TIMEZONE', 'Europe/Madrid')
+ZONE = ZoneInfo(TZ)
+
+VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY')
+VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY')
+VAPID_EMAIL = os.environ.get('VAPID_EMAIL', 'admin@example.com')
+TASKS_TOKEN = os.environ.get('TASKS_TOKEN')
+
+def now_local():
+    # Usa siempre la misma referencia horaria
+    return datetime.now(ZONE)
 
 # ============================================
 # Formato de horas -> "X h Y min" para toda la app
@@ -84,6 +98,26 @@ def format_seconds_to_hm(total_seconds):
 @app.template_filter('hm')
 def jinja_hm_filter(hours_value):
     return format_hours_to_hm(hours_value)
+from functools import wraps
+def require_tasks_token(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TASKS_TOKEN or request.headers.get('X-TASKS-TOKEN') != TASKS_TOKEN:
+            return jsonify({"error": "forbidden"}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+def today_schedule_for(user, dtu):
+    day = dtu.weekday()  # 0=Lunes
+    return Schedule.query.filter_by(user_id=user.id, day_of_week=day, is_active=True).first()
+
+def active_record_for_today(user):
+    today = now_local().date()
+    return TimeRecord.query.filter_by(user_id=user.id, date=today, exit_time=None).first()
+
+def hours_worked_total(user):
+    recs = TimeRecord.query.filter(TimeRecord.user_id==user.id, TimeRecord.exit_time.isnot(None)).all()
+    return sum((r.exit_time - r.entry_time).total_seconds()/3600 for r in recs)
 
 
 # Modelos
@@ -118,6 +152,45 @@ class TimeRecord(db.Model):
     longitude = db.Column(db.Float, nullable=True)
     notes = db.Column(db.String(500), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+
+
+
+class NotificationSettings(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
+
+    push_enabled = db.Column(db.Boolean, default=False)
+
+    # Minutos tras hora de inicio planificada sin entrada -> “No has fichado y ya es hora”
+    minutes_after_start_no_entry = db.Column(db.Integer, default=5)
+
+    # Fichaje abierto: recordatorio si lleva abierto X minutos
+    open_record_minutes = db.Column(db.Integer, default=15)
+
+    # Fichaje abierto cuando ya pasó la hora fin + X minutos
+    end_passed_minutes = db.Column(db.Integer, default=5)
+
+    # Resumen semanal (por defecto: domingo 18:00)
+    weekly_summary_day = db.Column(db.Integer, default=6)  # 0=Lunes ... 6=Domingo
+    weekly_summary_time = db.Column(db.Time, default=datetime.strptime('18:00', '%H:%M').time)
+
+    # “Anti-spam”: marcar cuándo ya se notificó ese día
+    last_missed_entry_sent = db.Column(db.Date, nullable=True)
+    last_open_record_sent = db.Column(db.Date, nullable=True)
+    last_weekly_sent = db.Column(db.Date, nullable=True)
+
+class PushSubscription(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    endpoint = db.Column(db.String(500), unique=True, nullable=False)
+    p256dh = db.Column(db.String(255), nullable=False)
+    auth = db.Column(db.String(255), nullable=False)
+    user_agent = db.Column(db.String(255), nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -293,6 +366,43 @@ Equipo Fichador
         import traceback
         print(f"🔍 Traceback: {traceback.format_exc()}")
         return False
+
+def send_push_to_user(user, title, body, data=None, actions=None):
+    if not (VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY and VAPID_EMAIL):
+        print("❌ VAPID keys/email no configurados.")
+        return False
+
+    payload = {
+        "title": title,
+        "body": body,
+        "icon": "/static/icon-192x192.png",
+        "badge": "/static/icon-72x72.png",
+        "data": data or {},
+        "actions": actions or [{"action": "fichar", "title": "Abrir fichador"}],
+    }
+
+    subs = PushSubscription.query.filter_by(user_id=user.id, is_active=True).all()
+    ok_any = False
+    for s in subs:
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": s.endpoint,
+                    "keys": {"p256dh": s.p256dh, "auth": s.auth},
+                },
+                data=json.dumps(payload),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": f"mailto:{VAPID_EMAIL}"},
+            )
+            ok_any = True
+        except WebPushException as e:
+            # Si falla, desactiva la suscripción
+            s.is_active = False
+            db.session.commit()
+            print("❌ WebPush error:", e)
+    return ok_any
+
+
 
 @app.context_processor
 def inject_now():
@@ -1173,6 +1283,162 @@ def admin_test_mail():
     else:
         flash('❌ Error al enviar el correo de prueba (revisa Logs)', 'error')
     return redirect(url_for('admin'))
+
+@app.route('/notifications', methods=['GET', 'POST'])
+@login_required
+def notifications():
+    settings = NotificationSettings.query.filter_by(user_id=current_user.id).first()
+    if not settings:
+        settings = NotificationSettings(user_id=current_user.id)
+        db.session.add(settings)
+        db.session.commit()
+
+    if request.method == 'POST':
+        settings.push_enabled = bool(request.form.get('push_enabled'))
+        settings.minutes_after_start_no_entry = int(request.form.get('minutes_after_start_no_entry', 5))
+        settings.open_record_minutes = int(request.form.get('open_record_minutes', 15))
+        settings.end_passed_minutes = int(request.form.get('end_passed_minutes', 5))
+        settings.weekly_summary_day = int(request.form.get('weekly_summary_day', 6))
+        settings.weekly_summary_time = datetime.strptime(request.form.get('weekly_summary_time', '18:00'), '%H:%M').time()
+        db.session.commit()
+        flash('Ajustes de notificaciones guardados ✅', 'success')
+        return redirect(url_for('notifications'))
+
+    return render_template('notifications.html', settings=settings, vapid_public=VAPID_PUBLIC_KEY)
+
+
+
+@app.post('/api/push/subscribe')
+@login_required
+def api_push_subscribe():
+    data = request.get_json(force=True)
+    endpoint = data.get('endpoint')
+    keys = (data.get('keys') or {})
+    p256dh = keys.get('p256dh')
+    authk = keys.get('auth')
+    ua = request.headers.get('User-Agent', '')
+
+    if not (endpoint and p256dh and authk):
+        return jsonify({"ok": False, "error": "Bad subscription"}), 400
+
+    sub = PushSubscription.query.filter_by(endpoint=endpoint).first()
+    if sub:
+        sub.p256dh = p256dh
+        sub.auth = authk
+        sub.is_active = True
+        sub.user_id = current_user.id
+    else:
+        sub = PushSubscription(
+            user_id=current_user.id,
+            endpoint=endpoint,
+            p256dh=p256dh,
+            auth=authk,
+            user_agent=ua
+        )
+        db.session.add(sub)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+@app.post('/api/push/unsubscribe')
+@login_required
+def api_push_unsubscribe():
+    data = request.get_json(force=True)
+    endpoint = data.get('endpoint')
+    if endpoint:
+        sub = PushSubscription.query.filter_by(endpoint=endpoint, user_id=current_user.id).first()
+        if sub:
+            sub.is_active = False
+            db.session.commit()
+    return jsonify({"ok": True})
+
+@app.post('/api/push/test')
+@login_required
+def api_push_test():
+    ok = send_push_to_user(current_user, "🔔 Prueba de notificaciones", "Si ves esto, las push ya funcionan.")
+    return jsonify({"ok": ok})
+
+@app.post('/tasks/notify_due_clockin')
+@require_tasks_token
+def task_notify_due_clockin():
+    now = now_local()
+    users = User.query.all()
+    count = 0
+    for u in users:
+        s = NotificationSettings.query.filter_by(user_id=u.id).first()
+        if not (s and s.push_enabled):
+            continue
+        sch = today_schedule_for(u, now)
+        if not sch:
+            continue
+
+        # Hora planificada + margen
+        planned_dt = datetime.combine(now.date(), sch.start_time, tzinfo=ZONE)
+        if now >= planned_dt + timedelta(minutes=s.minutes_after_start_no_entry):
+            has_entry = TimeRecord.query.filter_by(user_id=u.id, date=now.date()).first()
+            if not has_entry and s.last_missed_entry_sent != now.date():
+                if send_push_to_user(u, "⏰ No has fichado y ya es hora",
+                                     f"Tenías entrada a las {sch.start_time.strftime('%H:%M')}."):
+                    s.last_missed_entry_sent = now.date()
+                    db.session.commit()
+                    count += 1
+    return jsonify({"sent": count})
+
+@app.post('/tasks/notify_open_record')
+@require_tasks_token
+def task_notify_open_record():
+    now = now_local()
+    users = User.query.all()
+    count = 0
+    for u in users:
+        s = NotificationSettings.query.filter_by(user_id=u.id).first()
+        if not (s and s.push_enabled):
+            continue
+        rec = active_record_for_today(u)
+        if not rec:
+            continue
+
+        should = False
+        # 1) Fichaje abierto más de X minutos
+        if (now - rec.entry_time.replace(tzinfo=ZONE)).total_seconds() >= s.open_record_minutes*60:
+            should = True
+
+        # 2) Se pasó la hora fin + X si hay horario hoy
+        sch = today_schedule_for(u, now)
+        if sch:
+            end_dt = datetime.combine(now.date(), sch.end_time, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
+            if now >= end_dt:
+                should = True
+
+        if should and s.last_open_record_sent != now.date():
+            if send_push_to_user(u, "🕒 Tienes un fichaje abierto",
+                                 "¿Se te ha pasado cerrar? Revísalo cuando puedas."):
+                s.last_open_record_sent = now.date()
+                db.session.commit()
+                count += 1
+    return jsonify({"sent": count})
+
+@app.post('/tasks/weekly_summary')
+@require_tasks_token
+def task_weekly_summary():
+    now = now_local()
+    users = User.query.all()
+    count = 0
+    for u in users:
+        s = NotificationSettings.query.filter_by(user_id=u.id).first()
+        if not (s and s.push_enabled):
+            continue
+
+        # ¿Es el día/hora configurado y no enviado ya hoy?
+        if now.weekday() == s.weekly_summary_day and now.time() >= s.weekly_summary_time and s.last_weekly_sent != now.date():
+            total_required = u.total_hours_required or 150.0
+            done = hours_worked_total(u)
+            remaining = max(total_required - done, 0)
+            msg = f"Te quedan {remaining:.1f} h para finalizar las prácticas (hechas {done:.1f}/{total_required:.1f})."
+            if send_push_to_user(u, "📊 Resumen semanal", msg):
+                s.last_weekly_sent = now.date()
+                db.session.commit()
+                count += 1
+    return jsonify({"sent": count})
 
 
 # En desarrollo local
