@@ -32,12 +32,12 @@ if os.environ.get('DATABASE_URL'):
     database_url = os.environ.get('DATABASE_URL')
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    # Fuerza driver de psycopg v3 para evitar psycopg2 en Py 3.13
+    if database_url.startswith('postgresql://') and '+psycopg' not in database_url:
+        database_url = database_url.replace('postgresql://', 'postgresql+psycopg://', 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 else:
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///fichador.db'
-
-# Conexiones más estables en Render
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True}
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -151,10 +151,10 @@ def active_record_for_today(user):
     return TimeRecord.query.filter_by(user_id=user.id, date=today, exit_time=None).first()
 
 def hours_worked_total(user):
-    recs = TimeRecord.query.filter(TimeRecord.user_id == user.id, TimeRecord.exit_time.isnot(None)).all()
+    recs = TimeRecord.query.filter(TimeRecord.user_id==user.id, TimeRecord.exit_time.isnot(None)).all()
     total = 0.0
     for r in recs:
-        total += (as_utc_naive(r.exit_time) - as_utc_naive(r.entry_time)).total_seconds() / 3600
+        total += (as_utc_naive(r.exit_time) - as_utc_naive(r.entry_time)).total_seconds()/3600
     return total
 
 # ==========================
@@ -362,13 +362,10 @@ def send_push_to_user(user, title, body, data=None, actions=None):
             print("❌ WebPush error:", e)
     return ok_any
 
-# Pequeñas migraciones automáticas (SQLite y PostgreSQL)
+# Pequeñas migraciones automáticas (SQLite)
 def upgrade_db():
     from sqlalchemy import text
-    eng = db.session.bind
-    dialect = eng.dialect.name
-
-    if dialect == "sqlite":
+    with app.app_context():
         cols = db.session.execute(text("PRAGMA table_info(schedule);")).fetchall()
         names = {c[1] for c in cols}
         if "start_time_2" not in names:
@@ -383,29 +380,7 @@ def upgrade_db():
         if "last_missed_entry_sent_2" not in names:
             db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_2 DATE NULL"))
 
-    elif dialect == "postgresql":
-        def col_exists(table, col):
-            res = db.session.execute(
-                text("""
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_name=:t AND column_name=:c
-                """),
-                {"t": table, "c": col}
-            ).fetchone()
-            return bool(res)
-
-        if not col_exists("schedule", "start_time_2"):
-            db.session.execute(text('ALTER TABLE "schedule" ADD COLUMN start_time_2 TIME NULL'))
-        if not col_exists("schedule", "end_time_2"):
-            db.session.execute(text('ALTER TABLE "schedule" ADD COLUMN end_time_2 TIME NULL'))
-
-        if not col_exists("notification_settings", "last_missed_entry_sent_1"):
-            db.session.execute(text('ALTER TABLE "notification_settings" ADD COLUMN last_missed_entry_sent_1 DATE NULL'))
-        if not col_exists("notification_settings", "last_missed_entry_sent_2"):
-            db.session.execute(text('ALTER TABLE "notification_settings" ADD COLUMN last_missed_entry_sent_2 DATE NULL'))
-
-    db.session.commit()
+        db.session.commit()
 
 # ==========================
 # Contexto Jinja
@@ -1347,6 +1322,7 @@ def _job_notify_due_clockin(now=None):
         if getattr(sch, 'start_time_2', None):
             planned_dt2 = datetime.combine(now.date(), sch.start_time_2, tzinfo=ZONE)
             if now >= planned_dt2 + timedelta(minutes=s.minutes_after_start_no_entry):
+                boundary2_local = datetime.combine(now.date(), sch.start_time_2)
                 has_entry2 = TimeRecord.query.filter(
                     TimeRecord.user_id == u.id,
                     TimeRecord.date == now.date(),
@@ -1368,6 +1344,8 @@ def as_utc_naive(dt):
     if dt.tzinfo is None:
         return dt
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 
 def _job_notify_open_record(now=None):
     now = now or now_local()
