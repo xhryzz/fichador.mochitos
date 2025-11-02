@@ -149,7 +149,10 @@ def active_record_for_today(user):
 
 def hours_worked_total(user):
     recs = TimeRecord.query.filter(TimeRecord.user_id==user.id, TimeRecord.exit_time.isnot(None)).all()
-    return sum((r.exit_time - r.entry_time).total_seconds()/3600 for r in recs)
+    total = 0.0
+    for r in recs:
+        total += (as_utc_naive(r.exit_time) - as_utc_naive(r.entry_time)).total_seconds()/3600
+    return total
 
 # ==========================
 # Modelos
@@ -1330,6 +1333,16 @@ def _job_notify_due_clockin(now=None):
                         sent += 1
     return sent
 
+def as_utc_naive(dt):
+    """Devuelve dt en UTC sin tzinfo (naive).
+    Si ya viene naive, asumimos que está en UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def _job_notify_open_record(now=None):
     now = now or now_local()
     users = User.query.all()
@@ -1344,10 +1357,11 @@ def _job_notify_open_record(now=None):
 
         should = False
         # 1) Fichaje abierto más de X minutos (comparamos en UTC para evitar líos)
-        now_utc = now.astimezone(timezone.utc)
-        diff_secs = (now_utc - rec.entry_time).total_seconds()
-        if diff_secs >= s.open_record_minutes * 60:
-            should = True
+       now_utc_naive = datetime.utcnow()
+               entry_utc_naive = as_utc_naive(rec.entry_time)
+               diff_secs = (now_utc_naive - entry_utc_naive).total_seconds()
+               if diff_secs >= s.open_record_minutes * 60:
+                   should = True
 
         # 2) Pasó hora fin + X (en local)
         sch = today_schedule_for(u, now)
