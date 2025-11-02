@@ -42,6 +42,27 @@ login_manager.login_view = 'login'
 
 # Serializer para generar tokens seguros
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+# ========= Filtros/métodos de ayuda para formatear duraciones =========
+@app.template_filter('minutes')
+def _fmt_minutes(total_seconds):
+    try:
+        secs = float(total_seconds)
+    except (TypeError, ValueError):
+        return 0
+    return int(secs // 60)
+
+@app.template_filter('hhmm')
+def _fmt_hhmm(total_seconds):
+    try:
+        secs = float(total_seconds)
+    except (TypeError, ValueError):
+        return "0 h 00 min"
+    mins = int(secs // 60)
+    h = mins // 60
+    m = mins % 60
+    return f"{h} h {m:02d} min"
+
+
 
 # Modelos
 class User(UserMixin, db.Model):
@@ -389,9 +410,22 @@ def dashboard():
 
     total_hours_required = current_user.total_hours_required
 
+    
+    # Cálculos en minutos para mostrar detalle
+    weekly_minutes = int(sum((rec.exit_time - rec.entry_time).total_seconds() for rec in week_records) // 60) if week_records else 0
+    today_minutes = int(sum((rec.exit_time - rec.entry_time).total_seconds() for rec in today_records if rec.exit_time) // 60) if today_records else 0
+    all_records_list = all_records if 'all_records' in locals() else []
+    total_minutes_worked = int(sum((rec.exit_time - rec.entry_time).total_seconds() for rec in all_records_list) // 60) if all_records_list else 0
+    weekly_required_minutes = int(weekly_required_hours * 60)
+    total_required_minutes = int(total_hours_required * 60)
+    remaining_total_minutes = max(total_required_minutes - total_minutes_worked, 0)
+
     return render_template('dashboard.html', active_record=active_record, today_records=today_records,
                          weekly_hours=weekly_hours, today_hours=today_hours, weekly_required_hours=weekly_required_hours,
-                         total_hours_worked=total_hours_worked, total_hours_required=total_hours_required)
+                         total_hours_worked=total_hours_worked, total_hours_required=total_hours_required,
+                         weekly_minutes=weekly_minutes, today_minutes=today_minutes, total_minutes_worked=total_minutes_worked,
+                         weekly_required_minutes=weekly_required_minutes, total_required_minutes=total_required_minutes,
+                         remaining_total_minutes=remaining_total_minutes)
 
 @app.route('/clock_in', methods=['POST'])
 @login_required
@@ -430,249 +464,10 @@ def clock_out():
     active_record.is_active = False
     db.session.commit()
 
-    session_hours = (active_record.exit_time - active_record.entry_time).total_seconds() / 3600
-    flash(f'Salida registrada correctamente. Sesión: {session_hours:.2f} horas', 'success')
+    # Calcular duración y avisar
+    session_seconds = (active_record.exit_time - active_record.entry_time).total_seconds()
+    flash(f'Fichaje cerrado: {format_hhmm(session_seconds)}', 'success')
     return redirect(url_for('dashboard'))
-
-@app.route('/schedule')
-@login_required
-def schedule():
-    schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.day_of_week).all()
-    schedules_by_day = {s.day_of_week: s for s in schedules}
-    days_of_week = [(0, 'Lunes'), (1, 'Martes'), (2, 'Miércoles'), (3, 'Jueves'), (4, 'Viernes'), (5, 'Sábado'), (6, 'Domingo')]
-    return render_template('schedule.html', schedules_by_day=schedules_by_day, days_of_week=days_of_week)
-
-@app.route('/schedule/add', methods=['POST'])
-@login_required
-def add_schedule():
-    day_of_week = int(request.form.get('day_of_week'))
-    start_time = datetime.strptime(request.form.get('start_time'), '%H:%M').time()
-    end_time = datetime.strptime(request.form.get('end_time'), '%H:%M').time()
-    is_active = request.form.get('is_active') == 'on'
-    hours_required = (datetime.combine(datetime.min, end_time) - datetime.combine(datetime.min, start_time)).seconds / 3600
-
-    existing = Schedule.query.filter_by(user_id=current_user.id, day_of_week=day_of_week).first()
-    if existing:
-        existing.start_time = start_time
-        existing.end_time = end_time
-        existing.hours_required = hours_required
-        existing.is_active = is_active
-        flash('Horario actualizado correctamente', 'success')
-    else:
-        schedule = Schedule(user_id=current_user.id, day_of_week=day_of_week, start_time=start_time, end_time=end_time, hours_required=hours_required, is_active=is_active)
-        db.session.add(schedule)
-        flash('Horario añadido correctamente', 'success')
-
-    db.session.commit()
-    return redirect(url_for('schedule'))
-
-@app.route('/schedule/toggle/<int:id>')
-@login_required
-def toggle_schedule(id):
-    schedule = Schedule.query.get_or_404(id)
-    if schedule.user_id != current_user.id:
-        flash('No tienes permisos para modificar este horario', 'error')
-        return redirect(url_for('schedule'))
-    schedule.is_active = not schedule.is_active
-    db.session.commit()
-    flash(f'Horario {"activado" if schedule.is_active else "desactivado"} correctamente', 'success')
-    return redirect(url_for('schedule'))
-
-@app.route('/schedule/delete/<int:id>')
-@login_required
-def delete_schedule(id):
-    schedule = Schedule.query.get_or_404(id)
-    if schedule.user_id != current_user.id:
-        flash('No tienes permisos para eliminar este horario', 'error')
-        return redirect(url_for('schedule'))
-    db.session.delete(schedule)
-    db.session.commit()
-    flash('Horario eliminado correctamente', 'success')
-    return redirect(url_for('schedule'))
-
-@app.route('/schedule/copy_week', methods=['POST'])
-@login_required
-def copy_week():
-    source_day = int(request.form.get('source_day'))
-    target_days = request.form.getlist('target_days[]')
-    source_schedule = Schedule.query.filter_by(user_id=current_user.id, day_of_week=source_day).first()
-
-    if not source_schedule:
-        flash('No hay horario configurado para el día seleccionado', 'error')
-        return redirect(url_for('schedule'))
-
-    for day in target_days:
-        day = int(day)
-        if day == source_day:
-            continue
-        existing = Schedule.query.filter_by(user_id=current_user.id, day_of_week=day).first()
-        if existing:
-            existing.start_time = source_schedule.start_time
-            existing.end_time = source_schedule.end_time
-            existing.hours_required = source_schedule.hours_required
-            existing.is_active = source_schedule.is_active
-        else:
-            new_schedule = Schedule(user_id=current_user.id, day_of_week=day, start_time=source_schedule.start_time,
-                                   end_time=source_schedule.end_time, hours_required=source_schedule.hours_required, is_active=source_schedule.is_active)
-            db.session.add(new_schedule)
-
-    db.session.commit()
-    flash('Horarios copiados correctamente', 'success')
-    return redirect(url_for('schedule'))
-
-@app.route('/schedule/update_total_hours', methods=['POST'])
-@login_required
-def update_total_hours():
-    total_hours = float(request.form.get('total_hours', 150))
-    current_user.total_hours_required = total_hours
-    db.session.commit()
-    flash('Horas totales actualizadas correctamente', 'success')
-    return redirect(url_for('schedule'))
-
-@app.route('/records')
-@login_required
-def records():
-    page = request.args.get('page', 1, type=int)
-    records = TimeRecord.query.filter_by(user_id=current_user.id).order_by(TimeRecord.date.desc(), TimeRecord.entry_time.desc()).paginate(page=page, per_page=10)
-    return render_template('records.html', records=records)
-
-
-# =============================
-# CRUD de fichajes para usuario
-# =============================
-@app.route('/records/new', methods=['GET', 'POST'])
-@login_required
-def user_add_record():
-    if request.method == 'POST':
-        try:
-            date = datetime.strptime(request.form.get('date'), '%Y-%m-%d').date()
-            entry_time = datetime.strptime(request.form.get('entry_time'), '%H:%M').time()
-            exit_time_str = request.form.get('exit_time')
-            exit_time = datetime.strptime(exit_time_str, '%H:%M').time() if exit_time_str else None
-
-            if exit_time and datetime.combine(date, exit_time) < datetime.combine(date, entry_time):
-                flash('La salida no puede ser anterior a la entrada', 'error')
-                return redirect(url_for('user_add_record'))
-
-            latitude = float(request.form.get('latitude')) if request.form.get('latitude') else None
-            longitude = float(request.form.get('longitude')) if request.form.get('longitude') else None
-
-            record = TimeRecord(
-                user_id=current_user.id,
-                date=date,
-                entry_time=datetime.combine(date, entry_time),
-                exit_time=datetime.combine(date, exit_time) if exit_time else None,
-                location=request.form.get('location', ''),
-                latitude=latitude,
-                longitude=longitude,
-                notes=request.form.get('notes', '')
-            )
-            db.session.add(record)
-            db.session.commit()
-            flash('Fichaje creado correctamente', 'success')
-            return redirect(url_for('records'))
-        except Exception as e:
-            db.session.rollback()
-            print('Error al crear fichaje:', e)
-            flash('Error al crear el fichaje', 'error')
-            return redirect(url_for('user_add_record'))
-    return render_template('user_new_record.html')
-
-@app.route('/records/edit/<int:record_id>', methods=['GET', 'POST'])
-@login_required
-def user_edit_record(record_id):
-    record = TimeRecord.query.get_or_404(record_id)
-    if record.user_id != current_user.id:
-        flash('No tienes permisos para editar este fichaje', 'error')
-        return redirect(url_for('records'))
-
-    if request.method == 'POST':
-        try:
-            entry_time_str = request.form.get('entry_time')
-            exit_time_str = request.form.get('exit_time')
-            if entry_time_str:
-                record.entry_time = datetime.strptime(f"{record.date} {entry_time_str}", '%Y-%m-%d %H:%M')
-            if exit_time_str:
-                record.exit_time = datetime.strptime(f"{record.date} {exit_time_str}", '%Y-%m-%d %H:%M')
-            else:
-                record.exit_time = None
-
-            # Validación entrada/salida
-            if record.exit_time and record.exit_time < record.entry_time:
-                flash('La salida no puede ser anterior a la entrada', 'error')
-                return redirect(url_for('user_edit_record', record_id=record.id))
-
-            if request.form.get('latitude'):
-                record.latitude = float(request.form.get('latitude'))
-            if request.form.get('longitude'):
-                record.longitude = float(request.form.get('longitude'))
-            record.location = request.form.get('location', '')
-            record.notes = request.form.get('notes', '')
-            db.session.commit()
-            flash('Fichaje actualizado correctamente', 'success')
-            return redirect(url_for('records'))
-        except Exception as e:
-            db.session.rollback()
-            print('Error al actualizar fichaje:', e)
-            flash('Error al actualizar el fichaje', 'error')
-            return redirect(url_for('user_edit_record', record_id=record.id))
-
-    # Pasamos horas para prefijar el form
-    entry_prefill = record.entry_time.strftime('%H:%M') if record.entry_time else ''
-    exit_prefill = record.exit_time.strftime('%H:%M') if record.exit_time else ''
-    return render_template('user_edit_record.html', record=record, entry_prefill=entry_prefill, exit_prefill=exit_prefill)
-
-@app.route('/records/delete/<int:record_id>', methods=['POST'])
-@login_required
-def user_delete_record(record_id):
-    record = TimeRecord.query.get_or_404(record_id)
-    if record.user_id != current_user.id:
-        flash('No tienes permisos para eliminar este fichaje', 'error')
-        return redirect(url_for('records'))
-    try:
-        db.session.delete(record)
-        db.session.commit()
-        flash('Fichaje eliminado correctamente', 'success')
-    except Exception as e:
-        db.session.rollback()
-        print('Error al eliminar fichaje:', e)
-        flash('Error al eliminar el fichaje', 'error')
-    return redirect(url_for('records'))
-
-
-@app.route('/reports')
-@login_required
-def reports():
-    return render_template('reports.html')
-
-@app.route('/generate_report', methods=['POST'])
-@login_required
-def generate_report():
-    start_date = datetime.strptime(request.form.get('start_date'), '%Y-%m-%d').date()
-    end_date = datetime.strptime(request.form.get('end_date'), '%Y-%m-%d').date()
-    report_type = request.form.get('report_type')
-
-    records = TimeRecord.query.filter(TimeRecord.user_id == current_user.id, TimeRecord.date >= start_date, TimeRecord.date <= end_date).order_by(TimeRecord.date, TimeRecord.entry_time).all()
-
-    if report_type == 'csv':
-        return generate_csv_report(records, start_date, end_date)
-    elif report_type == 'pdf':
-        return generate_pdf_report(records, start_date, end_date)
-    else:
-        flash('Tipo de reporte no válido', 'error')
-        return redirect(url_for('reports'))
-
-def generate_csv_report(records, start_date, end_date):
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['Fecha', 'Entrada', 'Salida', 'Horas', 'Ubicación', 'Coordenadas'])
-    for record in records:
-        hours = round((record.exit_time - record.entry_time).total_seconds() / 3600, 2) if record.exit_time else ''
-        coords = f"{record.latitude:.6f}, {record.longitude:.6f}" if record.latitude and record.longitude else ''
-        writer.writerow([record.date.strftime('%d/%m/%Y'), record.entry_time.strftime('%H:%M'),
-                        record.exit_time.strftime('%H:%M') if record.exit_time else 'En curso', hours, record.location or '', coords])
-    output.seek(0)
-    return send_file(io.BytesIO(output.getvalue().encode('utf-8')), mimetype='text/csv', as_attachment=True, download_name=f'reporte_{start_date}_{end_date}.csv')
 
 def generate_pdf_report(records, start_date, end_date):
     buffer = io.BytesIO()
@@ -687,7 +482,7 @@ def generate_pdf_report(records, start_date, end_date):
     p.drawString(100, y, "Fecha")
     p.drawString(150, y, "Entrada")
     p.drawString(200, y, "Salida")
-    p.drawString(250, y, "Horas")
+    p.drawString(250, y, "Duración")
     p.drawString(300, y, "Ubicación")
     p.setFont("Helvetica", 10)
     y -= 20
@@ -696,7 +491,7 @@ def generate_pdf_report(records, start_date, end_date):
             p.showPage()
             y = 800
             p.setFont("Helvetica", 10)
-        hours = f"{(record.exit_time - record.entry_time).total_seconds() / 3600:.2f}h" if record.exit_time else 'En curso'
+        hours = format_hhmm((record.exit_time - record.entry_time).total_seconds()) if record.exit_time else 'En curso'
         location = (record.location or '')[:27] + '...' if len(record.location or '') > 30 else (record.location or '')
         p.drawString(100, y, record.date.strftime('%d/%m/%Y'))
         p.drawString(150, y, record.entry_time.strftime('%H:%M'))
@@ -967,3 +762,35 @@ if __name__ == '__main__':
 else:
     # En producción (Render), inicializar DB automáticamente al arrancar
     init_db()
+    
+# ==== PATCH: Helpers de duración (restaurados) ====
+@app.template_filter('minutes')
+def _fmt_minutes(total_seconds):
+    try:
+        secs = float(total_seconds)
+    except (TypeError, ValueError):
+        return 0
+    return int(secs // 60)
+
+@app.template_filter('hhmm')
+def _fmt_hhmm(total_seconds):
+    try:
+        secs = float(total_seconds)
+    except (TypeError, ValueError):
+        return "0 h 00 min"
+    mins = int(secs // 60)
+    h = mins // 60
+    m = mins % 60
+    return f"{h} h {m:02d} min"
+
+def format_hhmm(total_seconds: float) -> str:
+    try:
+        secs = float(total_seconds)
+    except (TypeError, ValueError):
+        return "0 h 00 min"
+    mins = int(secs // 60)
+    h = mins // 60
+    m = mins % 60
+    return f"{h} h {m:02d} min"
+
+init_db()

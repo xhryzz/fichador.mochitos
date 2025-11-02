@@ -98,7 +98,7 @@
                             </td>
                             <td>
                                 {% if record.exit_time %}
-                                {{ "%.2f"|format((record.exit_time - record.entry_time).total_seconds() / 3600) }}h
+                                {% set secs = (record.exit_time - record.entry_time).total_seconds() %}{{ secs|hhmm }} ({{ secs|minutes }} min)
                                 {% else %}
                                 -
                                 {% endif %}

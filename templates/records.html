@@ -21,7 +21,7 @@
             <th>Fecha</th>
             <th>Entrada</th>
             <th>Salida</th>
-            <th>Horas</th>
+            <th>Duración</th>
             <th>Ubicación</th>
             <th>Coordenadas</th>
             <th>Notas</th>
@@ -36,7 +36,7 @@
             <td>{{ record.exit_time.strftime('%H:%M') if record.exit_time else 'En curso' }}</td>
             <td>
               {% if record.exit_time %}
-                {{ ((record.exit_time - record.entry_time).total_seconds() / 3600)|round(2) }}
+                {% set secs = (record.exit_time - record.entry_time).total_seconds() %}{{ secs|hhmm }} — {{ secs|minutes }} min
               {% else %}
                 -
               {% endif %}

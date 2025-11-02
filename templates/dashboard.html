@@ -106,7 +106,7 @@
                                 </tbody>
                             </table>
                         </div>
-                        <p class="text-muted">Total hoy: <strong>{{ "%.2f"|format(today_hours) }} horas</strong></p>
+                        <p class="text-muted">Total hoy: <strong>{{ (today_minutes * 60)|hhmm }}</strong></p>
                     {% else %}
                         <p class="text-muted">No hay fichajes hoy</p>
                     {% endif %}
@@ -118,7 +118,7 @@
     <div class="col-md-4">
         <div class="stat-card">
             <h6>Horas esta semana</h6>
-            <h3>{{ "%.1f"|format(weekly_hours) }}h / {{ "%.0f"|format(weekly_required_hours) }}h</h3>
+            <h3>{{ (weekly_minutes*60)|hhmm }} / {{ (weekly_required_minutes*60)|hhmm }}</h3>
             {% if weekly_required_hours > 0 %}
             <div class="progress mt-2" style="height: 20px;">
                 <div class="progress-bar {% if weekly_hours >= weekly_required_hours %}bg-success{% elif weekly_hours >= weekly_required_hours * 0.8 %}bg-warning{% else %}bg-danger{% endif %}"
@@ -138,7 +138,7 @@
 
         <div class="stat-card mt-3">
             <h6>Horas totales (Prácticas)</h6>
-            <h3>{{ "%.1f"|format(total_hours_worked) }}h / {{ "%.0f"|format(total_hours_required) }}h</h3>
+            <h3>{{ (total_minutes_worked*60)|hhmm }} / {{ (total_required_minutes*60)|hhmm }}</h3>
             <div class="progress mt-2" style="height: 20px;">
                 <div class="progress-bar {% if total_hours_worked >= total_hours_required %}bg-success{% elif total_hours_worked >= total_hours_required * 0.8 %}bg-info{% else %}bg-primary{% endif %}"
                      role="progressbar"
@@ -150,7 +150,7 @@
                 </div>
             </div>
             <small class="text-muted mt-1 d-block">
-                Quedan: {{ "%.1f"|format(total_hours_required - total_hours_worked) }}h
+                Quedan: {{ "%.1f"|format(total_hours_required - total_hours_worked) }}h <small class="text-muted">({{ remaining_total_minutes }} min)</small>
             </small>
             <i class="fas fa-graduation-cap fa-2x text-info mt-2"></i>
         </div>
