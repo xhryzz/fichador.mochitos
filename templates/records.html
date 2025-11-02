@@ -1,163 +1,78 @@
-{% extends "base.html" %}
 
+{% extends 'base.html' %}
 {% block title %}Mis Registros{% endblock %}
-
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h4>Mis Registros</h4>
-            </div>
-            <div class="card-body">
-                {% if records.items %}
-                <div class="table-responsive">
-                    <table class="table table-striped">
-                        <thead>
-                            <tr>
-                                <th>Fecha</th>
-                                <th>Entrada</th>
-                                <th>Salida</th>
-                                <th>Horas</th>
-                                <th>Ubicación</th>
-                                <th>Estado</th>
-                            <th>Acciones</th></tr>
-                        </thead>
-                        <tbody>
-                            {% for record in records.items %}
-                            <tr>
-                                <td>{{ record.date.strftime('%d/%m/%Y') }}</td>
-                                <td>{{ record.entry_time.strftime('%H:%M') }}</td>
-                                <td>
-                                    {% if record.exit_time %}
-                                        {{ record.exit_time.strftime('%H:%M') }}
-                                    {% else %}
-                                        <span class="badge bg-warning">En curso</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if record.exit_time %}
-                                        {{ "%.2f"|format((record.exit_time - record.entry_time).total_seconds() / 3600) }}h
-                                    {% else %}
-                                        -
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if record.latitude and record.longitude %}
-                                    <button class="btn btn-sm btn-outline-primary view-map-btn" 
-                                            data-lat="{{ record.latitude }}" 
-                                            data-lng="{{ record.longitude }}"
-                                            data-location="{{ record.location }}">
-                                        <i class="fas fa-map-marker-alt"></i> Ver mapa
-                                    </button>
-                                    {% else %}
-                                    <span title="{{ record.location }}">{{ record.location|truncate(30) }}</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if record.exit_time %}
-                                        <span class="badge bg-success">Completado</span>
-                                    {% else %}
-                                        <span class="badge bg-warning">Activo</span>
-                                    {% endif %}
-                                </td>
-                            <td>
-  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('user_edit_record', record_id=record.id) }}">Editar</a>
-  <form method="POST" action="{{ url_for('user_delete_record', record_id=record.id) }}" style="display:inline" onsubmit="return confirm('¿Eliminar este fichaje?')">
-    <button class="btn btn-sm btn-outline-danger" type="submit">Eliminar</button>
-  </form>
-</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+<div class="container" style="max-width:1000px;margin:auto">
+  <div class="d-flex" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h2 style="margin:0">Mis Registros</h2>
+    <a href="{{ url_for('user_add_record') }}" class="btn btn-primary">+ Nuevo fichaje</a>
+  </div>
 
-                <!-- Paginación -->
-                <nav>
-                    <ul class="pagination justify-content-center">
-                        {% if records.has_prev %}
-                        <li class="page-item">
-                            <a class="page-link" href="{{ url_for('records', page=records.prev_num) }}">Anterior</a>
-                        </li>
-                        {% endif %}
-                        {% for page_num in records.iter_pages() %}
-                            {% if page_num %}
-                                <li class="page-item {{ 'active' if page_num == records.page else '' }}">
-                                    <a class="page-link" href="{{ url_for('records', page=page_num) }}">{{ page_num }}</a>
-                                </li>
-                            {% endif %}
-                        {% endfor %}
-                        {% if records.has_next %}
-                        <li class="page-item">
-                            <a class="page-link" href="{{ url_for('records', page=records.next_num) }}">Siguiente</a>
-                        </li>
-                        {% endif %}
-                    </ul>
-                </nav>
-                {% else %}
-                <p class="text-center">No hay registros.</p>
-                {% endif %}
-            </div>
-        </div>
+  {% if records.items|length == 0 %}
+    <div class="card" style="padding:20px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;text-align:center">
+      <p style="margin:0 0 10px 0">No hay registros.</p>
+      <a class="btn btn-primary" href="{{ url_for('user_add_record') }}">Crear mi primer fichaje</a>
     </div>
-</div>
-
-<!-- Modal para ver mapa de registros -->
-<div class="modal fade" id="recordMapModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Ubicación del fichaje</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <p id="modalLocationText" class="mb-3"></p>
-                <div id="recordMap" style="height: 400px; border-radius: 10px;"></div>
-            </div>
-        </div>
+  {% else %}
+    <div class="table-responsive">
+      <table class="table" style="width:100%">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Entrada</th>
+            <th>Salida</th>
+            <th>Horas</th>
+            <th>Ubicación</th>
+            <th>Coordenadas</th>
+            <th>Notas</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for record in records.items %}
+          <tr>
+            <td>{{ record.date.strftime('%d/%m/%Y') }}</td>
+            <td>{{ record.entry_time.strftime('%H:%M') }}</td>
+            <td>{{ record.exit_time.strftime('%H:%M') if record.exit_time else 'En curso' }}</td>
+            <td>
+              {% if record.exit_time %}
+                {{ ((record.exit_time - record.entry_time).total_seconds() / 3600)|round(2) }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>{{ record.location or '' }}</td>
+            <td>
+              {% if record.latitude and record.longitude %}
+                {{ '%.6f'|format(record.latitude) }}, {{ '%.6f'|format(record.longitude) }}
+              {% endif %}
+            </td>
+            <td>{{ record.notes or '' }}</td>
+            <td>
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('user_edit_record', record_id=record.id) }}">Editar</a>
+              <form method="POST" action="{{ url_for('user_delete_record', record_id=record.id) }}" style="display:inline" onsubmit="return confirm('¿Eliminar este fichaje?')">
+                <button class="btn btn-sm btn-outline-danger" type="submit">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
+
+    {% if records.pages > 1 %}
+    <nav aria-label="Paginación" style="margin-top:12px">
+      <ul class="pagination">
+        <li class="page-item {% if not records.has_prev %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for('records', page=records.prev_num) if records.has_prev else '#' }}">Anterior</a>
+        </li>
+        <li class="page-item disabled"><span class="page-link">Página {{ records.page }} de {{ records.pages }}</span></li>
+        <li class="page-item {% if not records.has_next %}disabled{% endif %}">
+          <a class="page-link" href="{{ url_for('records', page=records.next_num) if records.has_next else '#' }}">Siguiente</a>
+        </li>
+      </ul>
+    </nav>
+    {% endif %}
+  {% endif %}
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-// Función para mostrar mapa de registro histórico
-function showRecordMap(lat, lng, location) {
-    document.getElementById('modalLocationText').textContent = location;
-    
-    // Limpiar mapa existente
-    const mapContainer = document.getElementById('recordMap');
-    if (mapContainer._leaflet_id) {
-        mapContainer._leaflet_id = null;
-        mapContainer.innerHTML = '';
-    }
-    
-    // Pequeño delay para asegurar que el contenedor está listo
-    setTimeout(() => {
-        const recordMap = L.map('recordMap').setView([lat, lng], 16);
-        
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        }).addTo(recordMap);
-        
-        L.marker([lat, lng]).addTo(recordMap)
-            .bindPopup('Ubicación registrada')
-            .openPopup();
-    }, 100);
-}
-
-// Configurar event listeners para los botones de ver mapa
-document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.view-map-btn').forEach(button => {
-        button.addEventListener('click', function() {
-            const lat = parseFloat(this.getAttribute('data-lat'));
-            const lng = parseFloat(this.getAttribute('data-lng'));
-            const location = this.getAttribute('data-location');
-            
-            showRecordMap(lat, lng, location);
-            new bootstrap.Modal(document.getElementById('recordMapModal')).show();
-        });
-    });
-});
-</script>
 {% endblock %}
