@@ -21,6 +21,9 @@ from pywebpush import webpush, WebPushException
 from zoneinfo import ZoneInfo
 from functools import wraps
 
+# === Discord logger (nuevo) ===
+from utils.discord_logger import log_event, log_clock, log_record, log_schedule
+
 # ==========================
 # App & Config
 # ==========================
@@ -164,6 +167,16 @@ def hours_worked_total(user):
     for r in recs:
         total += (as_utc_naive(r.exit_time) - as_utc_naive(r.entry_time)).total_seconds()/3600
     return total
+
+# ======= Helper visual para logs de horarios (nuevo) =======
+DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo']
+def _slot_resumen(s):
+    def f(t): return t.strftime('%H:%M') if t else '—'
+    base = f"{f(s.start_time)}–{f(s.end_time)}"
+    if getattr(s, 'start_time_2', None) and getattr(s, 'end_time_2', None):
+        base += f" y {f(s.start_time_2)}–{f(s.end_time_2)}"
+    dia = DAYS_ES[getattr(s, 'day_of_week', 0)] if isinstance(getattr(s, 'day_of_week', 0), int) else str(getattr(s, 'day_of_week'))
+    return f"{dia}: {base} ({'activo' if getattr(s, 'is_active', False) else 'inactivo'})"
 
 # ==========================
 # Modelos
@@ -341,7 +354,7 @@ body {{ font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-ser
 # Push
 # ============================================
 import uuid
-from datetime import datetime
+from datetime import datetime  # (duplicado benigno; mantiene compatibilidad)
 
 def send_push_to_user(user, title, body, data=None, actions=None):
     if not (VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY and VAPID_EMAIL):
@@ -385,7 +398,6 @@ def send_push_to_user(user, title, body, data=None, actions=None):
     return ok_any
 
 
-# Pequeñas migraciones automáticas (SQLite)
 # Pequeñas migraciones automáticas (SQLite/PostgreSQL)
 def upgrade_db():
     from sqlalchemy import text
@@ -428,8 +440,6 @@ def upgrade_db():
                 except Exception as e:
                     print(f"⚠️ upgrade_db postgres: {e}")
             db.session.commit()
-
-
 
 
 # ==========================
@@ -626,6 +636,9 @@ def clock_in():
     )
     db.session.add(new_record)
     db.session.commit()
+    # Log Discord (nuevo)
+    log_clock("in", new_record, user=current_user)
+
     flash('Entrada registrada correctamente', 'success')
     return redirect(url_for('dashboard'))
 
@@ -647,6 +660,8 @@ def clock_out():
     active_record.exit_time = now_loc.astimezone(timezone.utc)  # UTC
     active_record.is_active = False
     db.session.commit()
+    # Log Discord (nuevo)
+    log_clock("out", active_record, user=current_user)
 
     session_hours = (active_record.exit_time - active_record.entry_time).total_seconds() / 3600
     flash(f'Salida registrada correctamente. Sesión: {session_hours:.2f} horas', 'success')
@@ -679,6 +694,9 @@ def add_schedule():
     if start_time_2 and end_time_2:
         hours_required += (datetime.combine(datetime.min, end_time_2) - datetime.combine(datetime.min, start_time_2)).seconds / 3600
 
+    action = None
+    obj = None
+
     existing = Schedule.query.filter_by(user_id=current_user.id, day_of_week=day_of_week).first()
     if existing:
         existing.start_time = start_time
@@ -687,6 +705,7 @@ def add_schedule():
         existing.end_time_2 = end_time_2
         existing.hours_required = hours_required
         existing.is_active = is_active
+        action = "update"; obj = existing
         flash('Horario actualizado correctamente', 'success')
     else:
         schedule = Schedule(
@@ -696,9 +715,15 @@ def add_schedule():
             hours_required=hours_required, is_active=is_active
         )
         db.session.add(schedule)
+        action = "create"; obj = schedule
         flash('Horario añadido correctamente', 'success')
 
     db.session.commit()
+
+    # Log Discord (nuevo)
+    if action and obj:
+        log_schedule(action, obj, user=current_user, extra={"Resumen": _slot_resumen(obj)})
+
     return redirect(url_for('schedule'))
 
 @app.route('/schedule/toggle/<int:id>')
@@ -710,6 +735,9 @@ def toggle_schedule(id):
         return redirect(url_for('schedule'))
     schedule.is_active = not schedule.is_active
     db.session.commit()
+    # Log Discord (nuevo)
+    log_schedule("update", schedule, user=current_user, extra={"Estado": "Activo" if schedule.is_active else "Inactivo"})
+
     flash(f'Horario {"activado" if schedule.is_active else "desactivado"} correctamente', 'success')
     return redirect(url_for('schedule'))
 
@@ -720,6 +748,9 @@ def delete_schedule(id):
     if schedule.user_id != current_user.id:
         flash('No tienes permisos para eliminar este horario', 'error')
         return redirect(url_for('schedule'))
+    # Log Discord (nuevo) antes de borrar
+    log_schedule("delete", schedule, user=current_user, extra={"Resumen": _slot_resumen(schedule)})
+
     db.session.delete(schedule)
     db.session.commit()
     flash('Horario eliminado correctamente', 'success')
@@ -758,6 +789,15 @@ def copy_week():
             db.session.add(new_schedule)
 
     db.session.commit()
+
+    # Log Discord (nuevo) resumen único
+    try:
+        days = [int(d) for d in target_days if int(d) != source_day]
+        log_event("📋 Copia de horario", user=current_user, level="info",
+                  fields={"Desde": DAYS_ES[source_day], "A": ", ".join(DAYS_ES[d] for d in days)})
+    except Exception:
+        pass
+
     flash('Horarios copiados correctamente', 'success')
     return redirect(url_for('schedule'))
 
@@ -813,6 +853,9 @@ def user_add_record():
             )
             db.session.add(record)
             db.session.commit()
+            # Log Discord (nuevo)
+            log_record("create", record, user=current_user)
+
             flash('Fichaje creado correctamente', 'success')
             return redirect(url_for('records'))
         except Exception as e:
@@ -857,6 +900,9 @@ def user_edit_record(record_id):
             record.location = request.form.get('location', '')
             record.notes = request.form.get('notes', '')
             db.session.commit()
+            # Log Discord (nuevo)
+            log_record("update", record, user=current_user)
+
             flash('Fichaje actualizado correctamente', 'success')
             return redirect(url_for('records'))
         except Exception as e:
@@ -877,6 +923,8 @@ def user_delete_record(record_id):
         flash('No tienes permisos para eliminar este fichaje', 'error')
         return redirect(url_for('records'))
     try:
+        # Log Discord (nuevo) antes de borrar
+        log_record("delete", record, user=current_user)
         db.session.delete(record)
         db.session.commit()
         flash('Fichaje eliminado correctamente', 'success')
@@ -1224,6 +1272,9 @@ def admin_edit_record(record_id):
         record.location = request.form.get('location', '')
         record.notes = request.form.get('notes', '')
         db.session.commit()
+        # Log Discord (nuevo)
+        log_record("update", record, user=current_user, extra={"Acción": "Admin", "Usuario destino": record.user_id})
+
         flash('Registro actualizado correctamente', 'success')
         return redirect(url_for('admin_user_records', user_id=record.user_id))
     return render_template('edit_record.html', record=record)
@@ -1254,6 +1305,9 @@ def admin_add_record():
     )
     db.session.add(new_record)
     db.session.commit()
+    # Log Discord (nuevo)
+    log_record("create", new_record, user=current_user, extra={"Acción": "Admin", "Usuario destino": new_record.user_id})
+
     flash('Registro añadido correctamente', 'success')
     return redirect(url_for('admin_user_records', user_id=user_id))
 
@@ -1265,6 +1319,8 @@ def admin_delete_record(record_id):
         return redirect(url_for('dashboard'))
     record = TimeRecord.query.get_or_404(record_id)
     user_id = record.user_id
+    # Log Discord (nuevo) antes de borrar
+    log_record("delete", record, user=current_user, extra={"Acción": "Admin", "Usuario destino": record.user_id})
     db.session.delete(record)
     db.session.commit()
     flash('Fichaje eliminado correctamente', 'success')
@@ -1586,6 +1642,16 @@ def notifications():
         settings.weekly_summary_day = int(request.form.get('weekly_summary_day', 6))
         settings.weekly_summary_time = datetime.strptime(request.form.get('weekly_summary_time', '18:00'), '%H:%M').time()
         db.session.commit()
+
+        # Log Discord (nuevo)
+        log_event("🔔 Ajustes de notificaciones", level="info", user=current_user, fields={
+            "Push activas": "Sí" if settings.push_enabled else "No",
+            "Gracia entrada (min)": settings.minutes_after_start_no_entry,
+            "Recordatorio abierto (min)": settings.open_record_minutes,
+            "Margen fin turno (min)": settings.end_passed_minutes,
+            "Resumen semanal": f"{DAYS_ES[settings.weekly_summary_day]} {settings.weekly_summary_time.strftime('%H:%M')}"
+        })
+
         flash('Ajustes de notificaciones guardados ✅', 'success')
         return redirect(url_for('notifications'))
 

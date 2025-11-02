@@ -11,3 +11,4 @@ sendgrid>=6.11.0
 pywebpush==2.1.1
 cryptography>=41.0
 tzdata
+requests>=2.31
