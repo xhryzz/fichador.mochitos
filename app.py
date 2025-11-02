@@ -11,6 +11,8 @@ import os
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 import resend
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 
 app = Flask(__name__)
 
@@ -31,8 +33,7 @@ else:
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Configurar Resend
-resend.api_key = os.environ.get("RESEND_API_KEY")
+
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
@@ -94,163 +95,153 @@ def verify_token(token, expiration=86400):
         return user_id
     except:
         return None
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+
 import os
 
 def send_setup_password_email(user):
-    """Envía correo con enlace para configurar contraseña usando Gmail SMTP"""
+    """
+    Envía el correo con enlace para configurar contraseña usando SendGrid API.
+    Requiere variables de entorno:
+      - SENDGRID_API_KEY  -> tu API Key de SendGrid
+      - FROM_EMAIL        -> el remitente verificado en SendGrid (Single Sender o dominio autenticado)
+    """
     try:
         if not user or not user.email:
             print("❌ No se pudo enviar el correo: usuario o email inválido")
             return False
 
-        print(f"🚀 Enviando correo con Gmail SMTP a: {user.email}")
-
-        # Configuración de Gmail
-        smtp_server = "smtp.gmail.com"
-        port = 587
-        sender_email = os.environ.get('GMAIL_EMAIL')  # Tu email de Gmail
-        password = os.environ.get('GMAIL_APP_PASSWORD')  # Contraseña de aplicación
-
-        if not sender_email or not password:
-            print("❌ GMAIL_EMAIL o GMAIL_APP_PASSWORD no configuradas")
+        api_key = os.environ.get("SENDGRID_API_KEY")
+        from_email = os.environ.get("FROM_EMAIL")
+        if not api_key:
+            print("❌ Falta SENDGRID_API_KEY en env vars")
             return False
+        if not from_email:
+            print("❌ Falta FROM_EMAIL en env vars (debe coincidir con el remitente verificado en SendGrid)")
+            return False
+
+        print(f"🚀 Enviando correo con SendGrid a: {user.email}")
 
         token = generate_token(user.id)
         setup_url = url_for('set_first_password_token', token=token, _external=True)
 
-        # Crear mensaje
-        message = MIMEMultipart("alternative")
-        message["Subject"] = "Configura tu contraseña - Fichador"
-        message["From"] = f"Fichador <{sender_email}>"
-        message["To"] = user.email
+        # Texto plano
+        text = f"""Fichador - Configura tu contraseña
 
-        # Versión texto
-        text = f"""\
-        Fichador - Configura tu contraseña
+Hola {user.name},
 
-        Hola {user.name},
+Se ha creado una cuenta para ti en Fichador.
 
-        Se ha creado una cuenta para ti en Fichador.
+Configura tu contraseña aquí:
+{setup_url}
 
-        Para configurar tu contraseña, visita este enlace:
-        {setup_url}
+Este enlace es válido por 24 horas.
 
-        Este enlace es válido por 24 horas.
+Tus datos:
+- Email: {user.email}
+- Horas requeridas: {user.total_hours_required} horas
 
-        Tus datos:
-        - Email: {user.email}
-        - Horas requeridas: {user.total_hours_required} horas
+Si no solicitaste esta cuenta, ignora este mensaje.
 
-        Si no solicitaste esta cuenta, ignora este mensaje.
+--
+Equipo Fichador
+"""
 
-        --
-        Equipo Fichador"""
-
-        # Versión HTML
+        # HTML (reutilizo tu diseño)
         html = f"""\
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Configura tu contraseña</title>
-            <style>
-                body {{
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                    line-height: 1.6;
-                    color: #333;
-                    max-width: 600px;
-                    margin: 0 auto;
-                    padding: 20px;
-                }}
-                .container {{
-                    background: white;
-                    border-radius: 12px;
-                    padding: 40px;
-                    margin: 20px 0;
-                    border: 1px solid #e1e5e9;
-                }}
-                .header {{
-                    text-align: center;
-                    margin-bottom: 30px;
-                    border-bottom: 1px solid #e1e5e9;
-                    padding-bottom: 20px;
-                }}
-                .logo {{
-                    font-size: 24px;
-                    font-weight: 700;
-                    color: #007AFF;
-                    margin-bottom: 8px;
-                }}
-                .button {{
-                    display: inline-block;
-                    background: #007AFF;
-                    color: white;
-                    padding: 14px 32px;
-                    text-decoration: none;
-                    border-radius: 8px;
-                    font-weight: 600;
-                    font-size: 16px;
-                    margin: 20px 0;
-                }}
-                .alert {{
-                    background: #eff6ff;
-                    border: 1px solid #3b82f6;
-                    border-radius: 8px;
-                    padding: 16px;
-                    margin: 20px 0;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <div class="logo">Fichador</div>
-                    <div style="font-size: 20px; color: #1f2937;">Bienvenido, {user.name}</div>
-                </div>
-                <p>Se ha creado una cuenta para ti en Fichador. Para comenzar a usar la plataforma, configura tu contraseña.</p>
-                <div style="text-align: center;">
-                    <a href="{setup_url}" class="button">Configurar Contraseña</a>
-                </div>
-                <div class="alert">
-                    <strong>⚠️ Importante:</strong> Este enlace es válido por 24 horas.
-                </div>
-                <div style="background: #f8fafc; padding: 20px; border-radius: 8px;">
-                    <div><strong>📧 Email:</strong> {user.email}</div>
-                    <div><strong>⏰ Horas requeridas:</strong> {user.total_hours_required} horas</div>
-                </div>
-                <div style="text-align: center; margin-top: 30px; color: #6b7280;">
-                    <p>Equipo Fichador</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configura tu contraseña</title>
+  <style>
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+    }}
+    .container {{
+      background: white;
+      border-radius: 12px;
+      padding: 40px;
+      margin: 20px 0;
+      border: 1px solid #e1e5e9;
+    }}
+    .header {{
+      text-align: center;
+      margin-bottom: 30px;
+      border-bottom: 1px solid #e1e5e9;
+      padding-bottom: 20px;
+    }}
+    .logo {{
+      font-size: 24px;
+      font-weight: 700;
+      color: #007AFF;
+      margin-bottom: 8px;
+    }}
+    .button {{
+      display: inline-block;
+      background: #007AFF;
+      color: white;
+      padding: 14px 32px;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 16px;
+      margin: 20px 0;
+    }}
+    .alert {{
+      background: #eff6ff;
+      border: 1px solid #3b82f6;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 20px 0;
+    }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">Fichador</div>
+      <div style="font-size: 20px; color: #1f2937;">Bienvenido, {user.name}</div>
+    </div>
+    <p>Se ha creado una cuenta para ti en Fichador. Para comenzar a usar la plataforma, configura tu contraseña.</p>
+    <div style="text-align: center;">
+      <a href="{setup_url}" class="button">Configurar Contraseña</a>
+    </div>
+    <div class="alert">
+      <strong>⚠️ Importante:</strong> Este enlace es válido por 24 horas.
+    </div>
+    <div style="background: #f8fafc; padding: 20px; border-radius: 8px;">
+      <div><strong>📧 Email:</strong> {user.email}</div>
+      <div><strong>⏰ Horas requeridas:</strong> {user.total_hours_required} horas</div>
+    </div>
+    <div style="text-align: center; margin-top: 30px; color: #6b7280;">
+      <p>Equipo Fichador</p>
+    </div>
+  </div>
+</body>
+</html>
+"""
 
-        # Convertir a MIMEText objects
-        part1 = MIMEText(text, "plain")
-        part2 = MIMEText(html, "html")
+        message = Mail(
+            from_email=from_email,       # ← Debe ser el remitente verificado (Single Sender o dominio)
+            to_emails=user.email,
+            subject="Configura tu contraseña - Fichador",
+            plain_text_content=text,
+            html_content=html
+        )
 
-        # Add HTML/plain-text parts to MIMEMultipart message
-        message.attach(part1)
-        message.attach(part2)
-
-        # Create secure connection with server and send email
-        server = smtplib.SMTP(smtp_server, port)
-        server.starttls()
-        server.login(sender_email, password)
-        server.sendmail(sender_email, user.email, message.as_string())
-        server.quit()
-
-        print(f"✅ Correo enviado exitosamente con Gmail SMTP")
-        print(f"   Para: {user.email}")
-        return True
+        sg = SendGridAPIClient(api_key)
+        resp = sg.send(message)
+        print(f"✅ SendGrid status={resp.status_code} (202=aceptado)")
+        return resp.status_code in (200, 202)
 
     except Exception as e:
-        print(f"❌ Error al enviar correo con Gmail SMTP: {str(e)}")
+        print(f"❌ ERROR_SENDGRID: {str(e)}")
         import traceback
         print(f"🔍 Traceback: {traceback.format_exc()}")
         return False
@@ -813,61 +804,7 @@ def api_active_record():
     active_record = TimeRecord.query.filter_by(user_id=current_user.id, date=today, exit_time=None).first()
     return jsonify({'has_active_record': active_record is not None, 'entry_time': active_record.entry_time.isoformat() if active_record else None})
 
-# Rutas para probar Resend
-@app.route('/admin/test-resend')
-@login_required
-def test_resend():
-    """Ruta para probar Resend (solo admin)"""
-    if not current_user.is_admin:
-        flash('No tienes permisos', 'error')
-        return redirect(url_for('dashboard'))
 
-    try:
-        if not resend.api_key:
-            flash('❌ RESEND_API_KEY no configurada', 'error')
-            return redirect(url_for('admin'))
-
-        params = {
-            "from": "Fichador <noreply@fichador-mochitos.onrender.com>",  # ← TU DOMINIO VERIFICADO
-            "to": [current_user.email],
-            "subject": "Prueba de Resend - Fichador",
-            "html": """
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #007AFF;">✅ Resend funciona correctamente</h2>
-                <p>Este es un correo de prueba enviado desde tu aplicación Fichador.</p>
-                <p><strong>Hora:</strong> """ + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """</p>
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                    <p style="margin: 0;">Si recibes este correo, Resend está configurado correctamente.</p>
-                </div>
-            </div>
-            """,
-            "text": f"Resend funciona correctamente. Hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        }
-
-        response = resend.Emails.send(params)
-
-        flash(f'✅ Correo de prueba enviado con Resend. ID: {response["id"]}', 'success')
-        print(f"📧 Correo de prueba enviado: {response['id']}")
-
-    except Exception as e:
-        flash(f'❌ Error con Resend: {str(e)}', 'error')
-        print(f"❌ Error en test-resend: {str(e)}")
-
-    return redirect(url_for('admin'))
-
-@app.route('/admin/resend-status')
-@login_required
-def resend_status():
-    """Verificar estado de Resend"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'No autorizado'}), 403
-
-    status = {
-        'resend_configured': bool(resend.api_key),
-        'api_key_length': len(resend.api_key) if resend.api_key else 0
-    }
-
-    return jsonify(status)
 
 # Error handlers
 @app.errorhandler(404)
@@ -898,6 +835,26 @@ def init_db():
             db.session.commit()
             print("✓ Usuario Admin Christian creado")
         print("✅ Base de datos inicializada correctamente")
+
+
+
+
+@app.route('/admin/test-mail')
+@login_required
+def admin_test_mail():
+    if not current_user.is_admin:
+        flash('No tienes permisos', 'error')
+        return redirect(url_for('dashboard'))
+
+    # Enviará un correo de “configura tu contraseña” al propio admin,
+    # solo para verificar que SendGrid funciona.
+    ok = send_setup_password_email(current_user)
+    if ok:
+        flash('✅ Correo de prueba enviado con SendGrid', 'success')
+    else:
+        flash('❌ Error al enviar el correo de prueba (revisa Logs)', 'error')
+    return redirect(url_for('admin'))
+
 
 # En desarrollo local
 if __name__ == '__main__':
