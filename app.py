@@ -76,36 +76,6 @@ class TimeRecord(db.Model):
     notes = db.Column(db.String(500), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
 
-
-
-# =============================
-# Filtros Jinja para duraciones
-# =============================
-@app.template_filter('dur_hm')
-def dur_hm(total_seconds):
-    """Devuelve 'Hh Mm' a partir de segundos (p.ej. 5h 07m)."""
-    if total_seconds is None:
-        return '-'
-    try:
-        total_seconds = int(total_seconds)
-    except Exception:
-        return '-'
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    return f"{hours}h {minutes:02d}m"
-
-@app.template_filter('dur_hhmm')
-def dur_hhmm(total_seconds):
-    """Devuelve 'HH:MM' a partir de segundos (p.ej. 05:07)."""
-    if total_seconds is None:
-        return '-'
-    try:
-        total_seconds = int(total_seconds)
-    except Exception:
-        return '-'
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    return f"{hours:02d}:{minutes:02d}"
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -402,28 +372,22 @@ def dashboard():
 
     week_start = today - timedelta(days=today.weekday())
     week_records = TimeRecord.query.filter(TimeRecord.user_id == current_user.id, TimeRecord.date >= week_start, TimeRecord.exit_time.isnot(None)).all()
-    weekly_seconds = sum(int((record.exit_time - record.entry_time).total_seconds()) for record in week_records)
-    weekly_hours = weekly_seconds / 3600
-    today_seconds = sum(int((record.exit_time - record.entry_time).total_seconds()) for record in today_records if record.exit_time)
-    today_hours = today_seconds / 3600
+    weekly_hours = sum((record.exit_time - record.entry_time).total_seconds() / 3600 for record in week_records)
+    today_hours = sum((record.exit_time - record.entry_time).total_seconds() / 3600 for record in today_records if record.exit_time)
 
     all_records = TimeRecord.query.filter(TimeRecord.user_id == current_user.id, TimeRecord.exit_time.isnot(None)).all()
-    total_seconds_worked = sum(int((record.exit_time - record.entry_time).total_seconds()) for record in all_records)
-    total_hours_worked = total_seconds_worked / 3600
+    total_hours_worked = sum((record.exit_time - record.entry_time).total_seconds() / 3600 for record in all_records)
 
     schedules = Schedule.query.filter_by(user_id=current_user.id, is_active=True).all()
     weekly_required_hours = 0
-    weekly_required_seconds = 0
     for i in range(7):
         day = week_start + timedelta(days=i)
         day_of_week = day.weekday()
         day_schedule = next((s for s in schedules if s.day_of_week == day_of_week), None)
         if day_schedule:
             weekly_required_hours += day_schedule.hours_required
-            weekly_required_seconds += int(day_schedule.hours_required * 3600)
 
     total_hours_required = current_user.total_hours_required
-    total_required_seconds = int(total_hours_required * 3600)
 
     return render_template('dashboard.html', active_record=active_record, today_records=today_records,
                          weekly_hours=weekly_hours, today_hours=today_hours, weekly_required_hours=weekly_required_hours,
@@ -572,6 +536,110 @@ def records():
     records = TimeRecord.query.filter_by(user_id=current_user.id).order_by(TimeRecord.date.desc(), TimeRecord.entry_time.desc()).paginate(page=page, per_page=10)
     return render_template('records.html', records=records)
 
+
+# =============================
+# CRUD de fichajes para usuario
+# =============================
+@app.route('/records/new', methods=['GET', 'POST'])
+@login_required
+def user_add_record():
+    if request.method == 'POST':
+        try:
+            date = datetime.strptime(request.form.get('date'), '%Y-%m-%d').date()
+            entry_time = datetime.strptime(request.form.get('entry_time'), '%H:%M').time()
+            exit_time_str = request.form.get('exit_time')
+            exit_time = datetime.strptime(exit_time_str, '%H:%M').time() if exit_time_str else None
+
+            if exit_time and datetime.combine(date, exit_time) < datetime.combine(date, entry_time):
+                flash('La salida no puede ser anterior a la entrada', 'error')
+                return redirect(url_for('user_add_record'))
+
+            latitude = float(request.form.get('latitude')) if request.form.get('latitude') else None
+            longitude = float(request.form.get('longitude')) if request.form.get('longitude') else None
+
+            record = TimeRecord(
+                user_id=current_user.id,
+                date=date,
+                entry_time=datetime.combine(date, entry_time),
+                exit_time=datetime.combine(date, exit_time) if exit_time else None,
+                location=request.form.get('location', ''),
+                latitude=latitude,
+                longitude=longitude,
+                notes=request.form.get('notes', '')
+            )
+            db.session.add(record)
+            db.session.commit()
+            flash('Fichaje creado correctamente', 'success')
+            return redirect(url_for('records'))
+        except Exception as e:
+            db.session.rollback()
+            print('Error al crear fichaje:', e)
+            flash('Error al crear el fichaje', 'error')
+            return redirect(url_for('user_add_record'))
+    return render_template('user_new_record.html')
+
+@app.route('/records/edit/<int:record_id>', methods=['GET', 'POST'])
+@login_required
+def user_edit_record(record_id):
+    record = TimeRecord.query.get_or_404(record_id)
+    if record.user_id != current_user.id:
+        flash('No tienes permisos para editar este fichaje', 'error')
+        return redirect(url_for('records'))
+
+    if request.method == 'POST':
+        try:
+            entry_time_str = request.form.get('entry_time')
+            exit_time_str = request.form.get('exit_time')
+            if entry_time_str:
+                record.entry_time = datetime.strptime(f"{record.date} {entry_time_str}", '%Y-%m-%d %H:%M')
+            if exit_time_str:
+                record.exit_time = datetime.strptime(f"{record.date} {exit_time_str}", '%Y-%m-%d %H:%M')
+            else:
+                record.exit_time = None
+
+            # Validación entrada/salida
+            if record.exit_time and record.exit_time < record.entry_time:
+                flash('La salida no puede ser anterior a la entrada', 'error')
+                return redirect(url_for('user_edit_record', record_id=record.id))
+
+            if request.form.get('latitude'):
+                record.latitude = float(request.form.get('latitude'))
+            if request.form.get('longitude'):
+                record.longitude = float(request.form.get('longitude'))
+            record.location = request.form.get('location', '')
+            record.notes = request.form.get('notes', '')
+            db.session.commit()
+            flash('Fichaje actualizado correctamente', 'success')
+            return redirect(url_for('records'))
+        except Exception as e:
+            db.session.rollback()
+            print('Error al actualizar fichaje:', e)
+            flash('Error al actualizar el fichaje', 'error')
+            return redirect(url_for('user_edit_record', record_id=record.id))
+
+    # Pasamos horas para prefijar el form
+    entry_prefill = record.entry_time.strftime('%H:%M') if record.entry_time else ''
+    exit_prefill = record.exit_time.strftime('%H:%M') if record.exit_time else ''
+    return render_template('user_edit_record.html', record=record, entry_prefill=entry_prefill, exit_prefill=exit_prefill)
+
+@app.route('/records/delete/<int:record_id>', methods=['POST'])
+@login_required
+def user_delete_record(record_id):
+    record = TimeRecord.query.get_or_404(record_id)
+    if record.user_id != current_user.id:
+        flash('No tienes permisos para eliminar este fichaje', 'error')
+        return redirect(url_for('records'))
+    try:
+        db.session.delete(record)
+        db.session.commit()
+        flash('Fichaje eliminado correctamente', 'success')
+    except Exception as e:
+        db.session.rollback()
+        print('Error al eliminar fichaje:', e)
+        flash('Error al eliminar el fichaje', 'error')
+    return redirect(url_for('records'))
+
+
 @app.route('/reports')
 @login_required
 def reports():
@@ -597,16 +665,12 @@ def generate_report():
 def generate_csv_report(records, start_date, end_date):
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Fecha', 'Entrada', 'Salida', 'Duración (hh:mm)', 'Horas decimales', 'Ubicación', 'Coordenadas'])
+    writer.writerow(['Fecha', 'Entrada', 'Salida', 'Horas', 'Ubicación', 'Coordenadas'])
     for record in records:
-        secs = int((record.exit_time - record.entry_time).total_seconds()) if record.exit_time else None
-        hhmm = f"{secs//3600:02d}:{(secs%3600)//60:02d}" if secs is not None else ''
-        hours_decimal = round(secs/3600, 2) if secs is not None else ''
+        hours = round((record.exit_time - record.entry_time).total_seconds() / 3600, 2) if record.exit_time else ''
         coords = f"{record.latitude:.6f}, {record.longitude:.6f}" if record.latitude and record.longitude else ''
-        writer.writerow([record.date.strftime('%d/%m/%Y'),
-                         record.entry_time.strftime('%H:%M'),
-                         record.exit_time.strftime('%H:%M') if record.exit_time else 'En curso',
-                         hhmm, hours_decimal, record.location or '', coords])
+        writer.writerow([record.date.strftime('%d/%m/%Y'), record.entry_time.strftime('%H:%M'),
+                        record.exit_time.strftime('%H:%M') if record.exit_time else 'En curso', hours, record.location or '', coords])
     output.seek(0)
     return send_file(io.BytesIO(output.getvalue().encode('utf-8')), mimetype='text/csv', as_attachment=True, download_name=f'reporte_{start_date}_{end_date}.csv')
 
@@ -623,7 +687,7 @@ def generate_pdf_report(records, start_date, end_date):
     p.drawString(100, y, "Fecha")
     p.drawString(150, y, "Entrada")
     p.drawString(200, y, "Salida")
-    p.drawString(250, y, "Duración")
+    p.drawString(250, y, "Horas")
     p.drawString(300, y, "Ubicación")
     p.setFont("Helvetica", 10)
     y -= 20
@@ -632,7 +696,7 @@ def generate_pdf_report(records, start_date, end_date):
             p.showPage()
             y = 800
             p.setFont("Helvetica", 10)
-        hours = (lambda s: f"{s//3600}h {((s)%3600)//60:02d}m")(int((record.exit_time - record.entry_time).total_seconds())) if record.exit_time else 'En curso'
+        hours = f"{(record.exit_time - record.entry_time).total_seconds() / 3600:.2f}h" if record.exit_time else 'En curso'
         location = (record.location or '')[:27] + '...' if len(record.location or '') > 30 else (record.location or '')
         p.drawString(100, y, record.date.strftime('%d/%m/%Y'))
         p.drawString(150, y, record.entry_time.strftime('%H:%M'))
