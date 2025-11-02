@@ -45,6 +45,14 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
+def _db_dialect():
+    try:
+        bind = db.session.get_bind()
+        return bind.dialect.name if bind else "sqlite"
+    except Exception:
+        return "sqlite"
+
+
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
 # ==========================
@@ -364,23 +372,43 @@ def send_push_to_user(user, title, body, data=None, actions=None):
 
 # Pequeñas migraciones automáticas (SQLite)
 def upgrade_db():
+    # Pequeñas migraciones automáticas según motor
     from sqlalchemy import text
     with app.app_context():
-        cols = db.session.execute(text("PRAGMA table_info(schedule);")).fetchall()
-        names = {c[1] for c in cols}
-        if "start_time_2" not in names:
-            db.session.execute(text("ALTER TABLE schedule ADD COLUMN start_time_2 TIME NULL"))
-        if "end_time_2" not in names:
-            db.session.execute(text("ALTER TABLE schedule ADD COLUMN end_time_2 TIME NULL"))
+        dialect = _db_dialect()
 
-        cols = db.session.execute(text("PRAGMA table_info(notification_settings);")).fetchall()
-        names = {c[1] for c in cols}
-        if "last_missed_entry_sent_1" not in names:
-            db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_1 DATE NULL"))
-        if "last_missed_entry_sent_2" not in names:
-            db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_2 DATE NULL"))
+        if dialect == "sqlite":
+            # --- SQLite (usa PRAGMA) ---
+            cols = db.session.execute(text("PRAGMA table_info(schedule);")).fetchall()
+            names = {c[1] for c in cols}
+            if "start_time_2" not in names:
+                db.session.execute(text("ALTER TABLE schedule ADD COLUMN start_time_2 TIME NULL"))
+            if "end_time_2" not in names:
+                db.session.execute(text("ALTER TABLE schedule ADD COLUMN end_time_2 TIME NULL"))
 
-        db.session.commit()
+            cols = db.session.execute(text("PRAGMA table_info(notification_settings);")).fetchall()
+            names = {c[1] for c in cols}
+            if "last_missed_entry_sent_1" not in names:
+                db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_1 DATE NULL"))
+            if "last_missed_entry_sent_2" not in names:
+                db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_2 DATE NULL"))
+
+            db.session.commit()
+
+        elif dialect == "postgresql":
+            # --- PostgreSQL (usa ALTER IF NOT EXISTS) ---
+            stmts = [
+                "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS start_time_2 TIME NULL",
+                "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS end_time_2 TIME NULL",
+                "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_1 DATE NULL",
+                "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_2 DATE NULL",
+            ]
+            for s in stmts:
+                try:
+                    db.session.execute(text(s))
+                except Exception as e:
+                    print(f"⚠️ upgrade_db postgres: {e}")
+            db.session.commit()
 
 # ==========================
 # Contexto Jinja
@@ -1276,12 +1304,13 @@ def internal_error(error):
 # ==========================
 def init_db():
     with app.app_context():
-        db.create_all()
-        upgrade_db()
+        db.create_all()   # crea tablas si no existen
+        upgrade_db()      # aplica columnas que falten en SQLite/Postgres
+
         if not User.query.filter_by(email='christianconhr@gmail.com').first():
             admin = User(
                 email='christianconhr@gmail.com',
-                password=generate_password_hash('Lionelmesi10'),
+                password=generate_password_hash('Lionelmesi10_'),
                 name='Christian',
                 is_admin=True,
                 is_first_login=False,
@@ -1291,6 +1320,7 @@ def init_db():
             db.session.commit()
             print("✓ Usuario Admin Christian creado")
         print("✅ Base de datos inicializada correctamente")
+
 
 # ==========================
 # Jobs (notificaciones)
