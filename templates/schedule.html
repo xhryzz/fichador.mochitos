@@ -66,6 +66,7 @@
                                                value="{{ schedule.end_time_2.strftime('%H:%M') if schedule and schedule.end_time_2 else '' }}">
                                     </div>
 
+
                                     <div class="form-check mb-2">
                                         <input class="form-check-input" type="checkbox"
                                                name="is_active" id="active_{{ day_num }}"
@@ -160,7 +161,10 @@
                             </span>
                         {% if schedule and schedule.is_active %}
                         <span class="badge bg-primary">
-                                    {{ schedule.start_time.strftime('%H:%M') }} - {{ schedule.end_time.strftime('%H:%M') }}
+{{ schedule.start_time.strftime('%H:%M') }} - {{ schedule.end_time.strftime('%H:%M') }}
+{% if schedule.start_time_2 and schedule.end_time_2 %}
+  &nbsp;•&nbsp; {{ schedule.start_time_2.strftime('%H:%M') }} - {{ schedule.end_time_2.strftime('%H:%M') }}
+{% endif %}
                                     ({{ "%.1f"|format(schedule.hours_required) }}h)
                                 </span>
                         {% else %}

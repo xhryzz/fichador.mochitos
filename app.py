@@ -144,6 +144,7 @@ class Schedule(db.Model):
     hours_required = db.Column(db.Float, nullable=False)
     is_active = db.Column(db.Boolean, default=True)
 
+
 class TimeRecord(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
@@ -179,11 +180,13 @@ class NotificationSettings(db.Model):
 
     # “Anti-spam”: marcar cuándo ya se notificó ese día
     last_missed_entry_sent = db.Column(db.Date, nullable=True)
-    # Nuevos: control por turno
-    last_missed_entry_sent_1 = db.Column(db.Date, nullable=True)
-    last_missed_entry_sent_2 = db.Column(db.Date, nullable=True)
     last_open_record_sent = db.Column(db.Date, nullable=True)
     last_weekly_sent = db.Column(db.Date, nullable=True)
+
+    # “Anti-spam” por turno (NUEVO)
+    last_missed_entry_sent_1 = db.Column(db.Date, nullable=True)  # turno 1
+    last_missed_entry_sent_2 = db.Column(db.Date, nullable=True)  # turno 2
+
 
 class PushSubscription(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -408,6 +411,27 @@ def send_push_to_user(user, title, body, data=None, actions=None):
             print("❌ WebPush error:", e)
     return ok_any
 
+def upgrade_db():
+    """Pequeñas migraciones automáticas para SQLite (añadir columnas si faltan)."""
+    from sqlalchemy import text
+    with app.app_context():
+        # schedule: columnas del 2º turno
+        cols = db.session.execute(text("PRAGMA table_info(schedule);")).fetchall()
+        names = {c[1] for c in cols}
+        if "start_time_2" not in names:
+            db.session.execute(text("ALTER TABLE schedule ADD COLUMN start_time_2 TIME NULL"))
+        if "end_time_2" not in names:
+            db.session.execute(text("ALTER TABLE schedule ADD COLUMN end_time_2 TIME NULL"))
+
+        # notification_settings: anti-spam por turno
+        cols = db.session.execute(text("PRAGMA table_info(notification_settings);")).fetchall()
+        names = {c[1] for c in cols}
+        if "last_missed_entry_sent_1" not in names:
+            db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_1 DATE NULL"))
+        if "last_missed_entry_sent_2" not in names:
+            db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_2 DATE NULL"))
+
+        db.session.commit()
 
 
 @app.context_processor
@@ -621,7 +645,7 @@ def add_schedule():
 
     is_active = request.form.get('is_active') == 'on'
 
-    # Cálculo de horas requeridas: suma de ambos turnos (si hay segundo)
+    # Horas del día = turno1 + (turno2 si existe)
     hours_required = (datetime.combine(datetime.min, end_time) - datetime.combine(datetime.min, start_time)).seconds / 3600
     if start_time_2 and end_time_2:
         hours_required += (datetime.combine(datetime.min, end_time_2) - datetime.combine(datetime.min, start_time_2)).seconds / 3600
@@ -636,9 +660,12 @@ def add_schedule():
         existing.is_active = is_active
         flash('Horario actualizado correctamente', 'success')
     else:
-        schedule = Schedule(user_id=current_user.id, day_of_week=day_of_week, start_time=start_time, end_time=end_time,
-                            start_time_2=start_time_2, end_time_2=end_time_2,
-                            hours_required=hours_required, is_active=is_active)
+        schedule = Schedule(
+            user_id=current_user.id, day_of_week=day_of_week,
+            start_time=start_time, end_time=end_time,
+            start_time_2=start_time_2, end_time_2=end_time_2,
+            hours_required=hours_required, is_active=is_active
+        )
         db.session.add(schedule)
         flash('Horario añadido correctamente', 'success')
 
@@ -689,16 +716,33 @@ def copy_week():
         if existing:
             existing.start_time = source_schedule.start_time
             existing.end_time = source_schedule.end_time
-            existing.start_time_2 = source_schedule.start_time_2
-            existing.end_time_2 = source_schedule.end_time_2
             existing.hours_required = source_schedule.hours_required
             existing.is_active = source_schedule.is_active
         else:
             new_schedule = Schedule(user_id=current_user.id, day_of_week=day, start_time=source_schedule.start_time,
-                                   end_time=source_schedule.end_time,
-                                   start_time_2=source_schedule.start_time_2,
-                                   end_time_2=source_schedule.end_time_2, hours_required=source_schedule.hours_required, is_active=source_schedule.is_active)
+                                   end_time=source_schedule.end_time, hours_required=source_schedule.hours_required, is_active=source_schedule.is_active)
             db.session.add(new_schedule)
+
+        for day in target_days:
+            day = int(day)
+            if day == source_day:
+                continue
+            existing = Schedule.query.filter_by(user_id=current_user.id, day_of_week=day).first()
+            if existing:
+                existing.start_time = source_schedule.start_time
+                existing.end_time = source_schedule.end_time
+                existing.start_time_2 = source_schedule.start_time_2
+                existing.end_time_2 = source_schedule.end_time_2
+                existing.hours_required = source_schedule.hours_required
+                existing.is_active = source_schedule.is_active
+            else:
+                new_schedule = Schedule(
+                    user_id=current_user.id, day_of_week=day,
+                    start_time=source_schedule.start_time, end_time=source_schedule.end_time,
+                    start_time_2=source_schedule.start_time_2, end_time_2=source_schedule.end_time_2,
+                    hours_required=source_schedule.hours_required, is_active=source_schedule.is_active
+                )
+                db.session.add(new_schedule)
 
     db.session.commit()
     flash('Horarios copiados correctamente', 'success')
@@ -1272,32 +1316,11 @@ def internal_error(error):
     return render_template('500.html'), 500
 
 # Inicialización de la base de datos
-
-def upgrade_db():
-    """Pequeñas migraciones automáticas para SQLite (añadir columnas si faltan)."""
-    from sqlalchemy import text
-    with app.app_context():
-        # Schedule extra shifts
-        cols = db.session.execute(text("PRAGMA table_info(schedule);")).fetchall()
-        names = {c[1] for c in cols}
-        if "start_time_2" not in names:
-            db.session.execute(text("ALTER TABLE schedule ADD COLUMN start_time_2 TIME NULL"))
-        if "end_time_2" not in names:
-            db.session.execute(text("ALTER TABLE schedule ADD COLUMN end_time_2 TIME NULL"))
-        # NotificationSettings per-shift anti-spam
-        cols = db.session.execute(text("PRAGMA table_info(notification_settings);")).fetchall()
-        names = {c[1] for c in cols}
-        if "last_missed_entry_sent_1" not in names:
-            db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_1 DATE NULL"))
-        if "last_missed_entry_sent_2" not in names:
-            db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_2 DATE NULL"))
-        db.session.commit()
-
-
 def init_db():
     """Inicializa la base de datos y crea el usuario admin si no existe"""
     with app.app_context():
         db.create_all()
+        upgrade_db()
         # Crear usuario admin solo si no existe
         if not User.query.filter_by(email='christianconhr@gmail.com').first():
             admin = User(
@@ -1344,8 +1367,8 @@ def _job_notify_due_clockin(now=None):
             if now >= planned_dt2 + timedelta(minutes=s.minutes_after_start_no_entry):
                 boundary2 = datetime.combine(now.date(), sch.start_time_2)
                 has_entry2 = TimeRecord.query.filter(
-                    TimeRecord.user_id==u.id,
-                    TimeRecord.date==now.date(),
+                    TimeRecord.user_id == u.id,
+                    TimeRecord.date == now.date(),
                     TimeRecord.entry_time >= boundary2
                 ).first()
                 if not has_entry2 and getattr(s, 'last_missed_entry_sent_2', None) != now.date():
@@ -1355,8 +1378,6 @@ def _job_notify_due_clockin(now=None):
                         db.session.commit()
                         sent += 1
     return sent
-
-
 
 def _job_notify_open_record(now=None):
     now = now or now_local()
@@ -1376,16 +1397,12 @@ def _job_notify_open_record(now=None):
         if diff_secs >= s.open_record_minutes * 60:
             should = True
 
-        # 2) Si ya pasó la hora de fin del turno 1 o turno 2 (+ margen)
+        # 2) Pasó hora fin + X
         sch = today_schedule_for(u, now)
         if sch:
-            end_dt1 = datetime.combine(now.date(), sch.end_time, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
-            if now >= end_dt1:
+            end_dt = datetime.combine(now.date(), sch.end_time, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
+            if now >= end_dt:
                 should = True
-            if getattr(sch, 'end_time_2', None):
-                end_dt2 = datetime.combine(now.date(), sch.end_time_2, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
-                if now >= end_dt2:
-                    should = True
 
         if should and s.last_open_record_sent != now.date():
             ok = send_push_to_user(
@@ -1398,7 +1415,24 @@ def _job_notify_open_record(now=None):
                 sent += 1
     return sent
 
-
+def _job_weekly_summary(now=None):
+    now = now or now_local()
+    users = User.query.all()
+    sent = 0
+    for u in users:
+        s = NotificationSettings.query.filter_by(user_id=u.id).first()
+        if not (s and s.push_enabled):
+            continue
+        if now.weekday() == s.weekly_summary_day and now.time() >= s.weekly_summary_time and s.last_weekly_sent != now.date():
+            total_required = u.total_hours_required or 150.0
+            done = hours_worked_total(u)
+            remaining = max(total_required - done, 0)
+            msg = f"Te quedan {remaining:.1f} h para finalizar las prácticas (hechas {done:.1f}/{total_required:.1f})."
+            if send_push_to_user(u, "📊 Resumen semanal", msg):
+                s.last_weekly_sent = now.date()
+                db.session.commit()
+                sent += 1
+    return sent
 # ========================================================================
 
 
