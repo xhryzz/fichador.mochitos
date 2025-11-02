@@ -1459,26 +1459,6 @@ def task_weekly_summary():
     count = _job_weekly_summary()
     return jsonify({"sent": count})
 
-@bp.get('/run-tick')
-def run_tick_endpoint():
-    _check()
-    try:
-        run_tick()
-        return "ok"
-    except Exception as e:
-        current_app.logger.exception("run_tick failed")
-        # Devuelve un JSON con la causa para depurar sin mirar logs
-        return jsonify(error="run_tick failed", detail=str(e)), 500
-
-@bp.get('/run-weekly')
-def run_weekly_endpoint():
-    _check()
-    try:
-        run_weekly_summaries()
-        return "ok"
-    except Exception as e:
-        current_app.logger.exception("run_weekly_summaries failed")
-        return jsonify(error="run_weekly_summaries failed", detail=str(e)), 500
 
 
 # ======== CRON GET (con token por query) ========
