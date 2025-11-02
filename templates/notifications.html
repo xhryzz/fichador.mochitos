@@ -93,6 +93,10 @@
             <button id="btnWeeklyNow" type="button" class="btn btn-outline-primary">
                 Enviar resumen semanal ahora
             </button>
+
+            <button id="btnResetFlags" type="button" class="btn btn-outline-secondary">
+                Resetear flags de hoy
+            </button>
         </div>
 
         <p class="mt-2 small text-muted">
@@ -178,6 +182,12 @@
         } catch (e) {
             alert('Error de red ❌');
         }
+    });
+
+    document.getElementById('btnResetFlags')?.addEventListener('click', async () => {
+        const r = await fetch('/me/reset-notify-flags', { method:'POST' });
+        const j = await r.json();
+        alert(j.ok ? 'Flags reseteadas ✅' : ('Error ❌ ' + (j.error||'')));
     });
 </script>
 {% endblock %}

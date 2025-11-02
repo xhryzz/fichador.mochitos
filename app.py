@@ -1615,11 +1615,49 @@ def tasks_run_tick():
 def tasks_run_weekly():
     _check_cron_token()
     try:
-        weekly = _job_weekly_summary()
+        force = (request.args.get('force') == '1')
+        weekly = _job_weekly_summary(force=force)
         return jsonify(ok=True, weekly=weekly)
     except Exception as e:
         app.logger.exception("run-weekly failed")
         return jsonify(ok=False, error=str(e)), 500
+
+@app.post('/me/reset-notify-flags')
+@login_required
+def me_reset_notify_flags():
+    s = NotificationSettings.query.filter_by(user_id=current_user.id).first()
+    if not s:
+        return jsonify(ok=False, error="No settings"), 400
+    # Limpia “enviado hoy” para que vuelvan a saltar
+    s.last_weekly_sent = None
+    s.last_missed_entry_sent = None
+    s.last_open_record_sent = None
+    s.last_missed_entry_sent_1 = None
+    s.last_missed_entry_sent_2 = None
+    db.session.commit()
+    return jsonify(ok=True)
+
+
+@app.get('/me/notify-debug')
+@login_required
+def me_notify_debug():
+    s = NotificationSettings.query.filter_by(user_id=current_user.id).first()
+    now = now_local()
+    return jsonify(
+        now=str(now),
+        weekday=now.weekday(),   # 0=Lunes ... 6=Domingo
+        time=str(now.time())[:8],
+        settings=dict(
+            push_enabled=bool(s.push_enabled) if s else None,
+            weekly_summary_day=(s.weekly_summary_day if s else None),
+            weekly_summary_time=(s.weekly_summary_time.isoformat() if s and s.weekly_summary_time else None),
+            last_weekly_sent=(s.last_weekly_sent.isoformat() if s and s.last_weekly_sent else None),
+            last_missed_entry_sent_1=(s.last_missed_entry_sent_1.isoformat() if s and s.last_missed_entry_sent_1 else None),
+            last_missed_entry_sent_2=(s.last_missed_entry_sent_2.isoformat() if s and s.last_missed_entry_sent_2 else None),
+            last_open_record_sent=(s.last_open_record_sent.isoformat() if s and s.last_open_record_sent else None),
+        )
+    )
+
 
 # ==========================
 # Main / Render
