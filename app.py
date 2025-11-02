@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, time
 from itsdangerous import URLSafeTimedSerializer
 import json
 import csv
@@ -1551,12 +1551,13 @@ def api_push_subscribe():
 
 @app.post('/me/send-weekly-now')
 @login_required
- def me_send_weekly_now():
-     # Lanza el job sólo para el usuario actual y forzando envío
-     sent = _job_weekly_summary(force=True, user_id=current_user.id)
-     return jsonify(ok=True, sent=sent)
+def me_send_weekly_now():
+    # Lanza el job sólo para el usuario actual y forzando envío
+    sent = _job_weekly_summary(force=True, user_id=current_user.id)
+    return jsonify(ok=True, sent=sent)
 
-     
+
+
 @app.post('/api/push/unsubscribe')
 @login_required
 def api_push_unsubscribe():
