@@ -340,19 +340,30 @@ body {{ font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-ser
 # ============================================
 # Push
 # ============================================
+import uuid
+from datetime import datetime
+
 def send_push_to_user(user, title, body, data=None, actions=None):
     if not (VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY and VAPID_EMAIL):
         print("❌ VAPID keys/email no configurados.")
         return False
 
+    nid = int(datetime.now().timestamp())  # id simple por timestamp
     payload = {
         "title": title,
         "body": body,
         "icon": "/static/icon-192x192.png",
         "badge": "/static/icon-72x72.png",
-        "data": data or {},
+        "data": { "url": "/dashboard", "nid": nid, **(data or {}) },
         "actions": actions or [{"action": "fichar", "title": "Abrir fichador"}],
     }
+
+    # 👉 Muy importante para fiabilidad:
+    headers = {
+        "Urgency": "high",                                  # entrega prioritaria
+        "Topic": f"user-{user.id}-{nid}"                    # único => no se colapsa
+    }
+    ttl_seconds = 1800  # 30 min de ventana de entrega; ajusta a tu gusto
 
     subs = PushSubscription.query.filter_by(user_id=user.id, is_active=True).all()
     ok_any = False
@@ -363,6 +374,8 @@ def send_push_to_user(user, title, body, data=None, actions=None):
                 data=json.dumps(payload),
                 vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims={"sub": f"mailto:{VAPID_EMAIL}"},
+                ttl=ttl_seconds,
+                headers=headers,   # ← aquí la magia
             )
             ok_any = True
         except WebPushException as e:
@@ -370,6 +383,7 @@ def send_push_to_user(user, title, body, data=None, actions=None):
             db.session.commit()
             print("❌ WebPush error:", e)
     return ok_any
+
 
 # Pequeñas migraciones automáticas (SQLite)
 # Pequeñas migraciones automáticas (SQLite/PostgreSQL)
@@ -1333,46 +1347,62 @@ def init_db():
 # ==========================
 # Jobs (notificaciones)
 # ==========================
-def _job_notify_due_clockin(now=None):
-    now = now or now_local()
-    users = User.query.all()
-    sent = 0
-    for u in users:
-        s = NotificationSettings.query.filter_by(user_id=u.id).first()
-        if not (s and s.push_enabled):
-            continue
-        sch = today_schedule_for(u, now)
-        if not sch:
-            continue
+ddef _job_notify_due_clockin(now=None, force=False):
+     now = now or now_local()
+     users = User.query.all()
+     sent = 0
 
-        # Turno 1
-        planned_dt1 = datetime.combine(now.date(), sch.start_time, tzinfo=ZONE)
-        if now >= planned_dt1 + timedelta(minutes=s.minutes_after_start_no_entry):
-            has_entry1 = TimeRecord.query.filter_by(user_id=u.id, date=now.date()).first()
-            if not has_entry1 and getattr(s, 'last_missed_entry_sent_1', None) != now.date():
-                ok = send_push_to_user(u, "🔔 No has fichado y ya es hora", "Recuerda fichar la ENTRADA (turno 1).")
-                if ok:
-                    s.last_missed_entry_sent_1 = now.date()
-                    db.session.commit()
-                    sent += 1
+     for u in users:
+         s = NotificationSettings.query.filter_by(user_id=u.id).first()
+         if not (s and s.push_enabled):
+             continue
 
-        # Turno 2 (opcional)
-        if getattr(sch, 'start_time_2', None):
-            planned_dt2 = datetime.combine(now.date(), sch.start_time_2, tzinfo=ZONE)
-            if now >= planned_dt2 + timedelta(minutes=s.minutes_after_start_no_entry):
-                boundary2_local = datetime.combine(now.date(), sch.start_time_2)
-                has_entry2 = TimeRecord.query.filter(
-                    TimeRecord.user_id == u.id,
-                    TimeRecord.date == now.date(),
-                    TimeRecord.entry_time >= datetime.combine(now.date(), sch.start_time_2, tzinfo=ZONE).astimezone(timezone.utc)
-                ).first()
-                if not has_entry2 and getattr(s, 'last_missed_entry_sent_2', None) != now.date():
-                    ok = send_push_to_user(u, "🔔 No has fichado y ya es hora", "Recuerda fichar la ENTRADA (turno 2).")
-                    if ok:
-                        s.last_missed_entry_sent_2 = now.date()
-                        db.session.commit()
-                        sent += 1
-    return sent
+         sch = today_schedule_for(u, now)
+         if not sch or not sch.is_active:
+             continue
+
+         # helper
+         active_rec = active_record_for_today(u)
+
+         # -------- Turno 1 --------
+         planned_dt1 = datetime.combine(now.date(), sch.start_time, tzinfo=ZONE)
+         should1 = False
+         if now >= planned_dt1 + timedelta(minutes=s.minutes_after_start_no_entry):
+             # si hay fichaje activo o cualquier entrada hoy => no avisar
+             has_any_today = TimeRecord.query.filter_by(user_id=u.id, date=now.date()).first() is not None
+             if not active_rec and not has_any_today:
+                 should1 = True
+
+         if (force or should1) and (force or getattr(s, 'last_missed_entry_sent_1', None) != now.date()):
+             if send_push_to_user(u, "🔔 No has fichado y ya es hora", "Recuerda fichar la ENTRADA"):
+                 s.last_missed_entry_sent_1 = now.date()
+                 db.session.commit()
+                 sent += 1
+
+         # -------- Turno 2 (opcional) --------
+         if getattr(sch, 'start_time_2', None) and getattr(sch, 'end_time_2', None):
+             planned_dt2 = datetime.combine(now.date(), sch.start_time_2, tzinfo=ZONE)
+             should2 = False
+             if now >= planned_dt2 + timedelta(minutes=s.minutes_after_start_no_entry):
+                 # si hay fichaje activo => no avisar
+                 if not active_rec:
+                     # ¿hay alguna entrada hoy que pertenezca al 2º tramo?
+                     start2_utc = planned_dt2.astimezone(timezone.utc)
+                     has_entry2 = TimeRecord.query.filter(
+                         TimeRecord.user_id == u.id,
+                         TimeRecord.date == now.date(),
+                         TimeRecord.entry_time >= start2_utc
+                     ).first() is not None
+                     if not has_entry2:
+                         should2 = True
+
+             if (force or should2) and (force or getattr(s, 'last_missed_entry_sent_2', None) != now.date()):
+                 if send_push_to_user(u, "🔔 No has fichado y ya es hora", "Recuerda fichar la ENTRADA (turno de tarde)"):
+                     s.last_missed_entry_sent_2 = now.date()
+                     db.session.commit()
+                     sent += 1
+
+     return sent
 
 def as_utc_naive(dt):
     """Devuelve dt en UTC sin tzinfo (naive).
@@ -1384,55 +1414,49 @@ def as_utc_naive(dt):
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-
-def _job_notify_open_record(now=None):
+def _job_notify_open_record(now=None, force=False):
     now = now or now_local()
     users = User.query.all()
     sent = 0
+
     for u in users:
         s = NotificationSettings.query.filter_by(user_id=u.id).first()
         if not (s and s.push_enabled):
             continue
 
         rec = active_record_for_today(u)
-        if not rec:
-            continue
-
         should = False
 
-        # 1) Fichaje abierto más de X minutos (normalizamos a UTC naive)
-        now_utc_naive = datetime.utcnow()
-        entry_utc_naive = as_utc_naive(rec.entry_time)
-        diff_secs = (now_utc_naive - entry_utc_naive).total_seconds()
-        if diff_secs >= s.open_record_minutes * 60:
-            should = True
-
-        # 2) Pasó hora fin + X (en local)
-        sch = today_schedule_for(u, now)
-        if sch:
-            end_dt = datetime.combine(now.date(), sch.end_time, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
-            if now >= end_dt:
+        # (1) Hay uno abierto desde hace >= open_record_minutes
+        if rec:
+            now_utc_naive = datetime.utcnow()
+            entry_utc_naive = as_utc_naive(rec.entry_time)
+            if (now_utc_naive - entry_utc_naive).total_seconds() >= s.open_record_minutes * 60:
                 should = True
 
-        if should and s.last_open_record_sent != now.date():
-            ok = send_push_to_user(
-                u,
-                "🕒 Tienes un fichaje abierto",
-                "¿Se te ha pasado cerrar? Revísalo cuando puedas."
-            )
-            if ok:
+        # (2) Pasó fin de turno (1 o 2) + end_passed_minutes
+        sch = today_schedule_for(u, now)
+        if sch:
+            end_candidates = [sch.end_time]
+            if getattr(sch, 'end_time_2', None):
+                end_candidates.append(sch.end_time_2)
+            for et in end_candidates:
+                end_dt = datetime.combine(now.date(), et, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
+                if now >= end_dt:
+                    should = True
+                    break
+
+        if (force or should) and (force or s.last_open_record_sent != now.date()):
+            if send_push_to_user(u, "🕒 Tienes un fichaje abierto", "¿Se te ha pasado cerrar? Revísalo cuando puedas."):
                 s.last_open_record_sent = now.date()
                 db.session.commit()
                 sent += 1
+
     return sent
 
-def _job_weekly_summary(now=None, force=False, user_id=None):
-    # Usa tu helper si lo tienes; si no, cae a now() “normal”
-    try:
-        current = now or now_local()  # tu función que respeta Europe/Madrid
-    except NameError:
-        current = now or datetime.now()
 
+def _job_weekly_summary(now=None, force=False, user_id=None):
+    current = now or now_local()
     qs = User.query
     if user_id:
         qs = qs.filter_by(id=user_id)
@@ -1444,25 +1468,93 @@ def _job_weekly_summary(now=None, force=False, user_id=None):
         if not (s and s.push_enabled):
             continue
 
-        cond = (
-            current.weekday() == s.weekly_summary_day and
-            current.time() >= s.weekly_summary_time and
-            s.last_weekly_sent != getattr(current, "date", lambda: current.date)()
-        )
+        already_today = (s.last_weekly_sent == current.date())
+        cond = (current.weekday() == s.weekly_summary_day
+                and current.time() >= s.weekly_summary_time
+                and not already_today)
 
         if force or cond:
-            total_required = getattr(u, "total_hours_required", None) or 150.0
-            done = hours_worked_total(u)  # tu helper existente
+            total_required = getattr(u, "total_hours_required", 150.0) or 150.0
+            done = hours_worked_total(u)
             remaining = max(total_required - done, 0.0)
-
-            title = "📊 Resumen semanal"
-            body = f"Te quedan {remaining:.1f} h para finalizar las prácticas (hechas {done:.1f}/{total_required:.1f})."
-
-            if send_push_to_user(u, title, body):
-                s.last_weekly_sent = current.date() if hasattr(current, "date") else datetime.now().date()
+            if send_push_to_user(u, "📊 Resumen semanal",
+                                 f"Te quedan {remaining:.1f} h para finalizar las prácticas (hechas {done:.1f}/{total_required:.1f})."):
+                s.last_weekly_sent = current.date()
                 db.session.commit()
                 sent += 1
     return sent
+
+@app.get('/me/notify-dry-run')
+@login_required
+def me_notify_dry_run():
+    now = now_local()
+    s = NotificationSettings.query.filter_by(user_id=current_user.id).first()
+    sch = today_schedule_for(current_user, now)
+    active = active_record_for_today(current_user)
+
+    decisions = {
+        "now": str(now),
+        "weekday": now.weekday(),
+        "schedule": None,
+        "active_record": bool(active),
+        "due_clockin_turn1": None,
+        "due_clockin_turn2": None,
+        "open_record_should": None,
+        "weekly_should": None,
+        "flags": {
+            "last_missed_entry_sent_1": (s.last_missed_entry_sent_1.isoformat() if s and s.last_missed_entry_sent_1 else None),
+            "last_missed_entry_sent_2": (s.last_missed_entry_sent_2.isoformat() if s and s.last_missed_entry_sent_2 else None),
+            "last_open_record_sent": (s.last_open_record_sent.isoformat() if s and s.last_open_record_sent else None),
+            "last_weekly_sent": (s.last_weekly_sent.isoformat() if s and s.last_weekly_sent else None),
+        }
+    }
+
+    if sch:
+        decisions["schedule"] = dict(
+            start=str(sch.start_time),
+            end=str(sch.end_time),
+            start2=str(getattr(sch, 'start_time_2', None)),
+            end2=str(getattr(sch, 'end_time_2', None)),
+            is_active=sch.is_active
+        )
+
+        # turno 1
+        planned1 = datetime.combine(now.date(), sch.start_time, tzinfo=ZONE) + timedelta(minutes=s.minutes_after_start_no_entry)
+        has_any_today = TimeRecord.query.filter_by(user_id=current_user.id, date=now.date()).first() is not None
+        decisions["due_clockin_turn1"] = (now >= planned1 and not active and not has_any_today)
+
+        # turno 2
+        if getattr(sch, 'start_time_2', None) and getattr(sch, 'end_time_2', None):
+            planned2 = datetime.combine(now.date(), sch.start_time_2, tzinfo=ZONE) + timedelta(minutes=s.minutes_after_start_no_entry)
+            start2_utc = datetime.combine(now.date(), sch.start_time_2, tzinfo=ZONE).astimezone(timezone.utc)
+            has_entry2 = TimeRecord.query.filter(
+                TimeRecord.user_id == current_user.id,
+                TimeRecord.date == now.date(),
+                TimeRecord.entry_time >= start2_utc
+            ).first() is not None
+            decisions["due_clockin_turn2"] = (now >= planned2 and not active and not has_entry2)
+        else:
+            decisions["due_clockin_turn2"] = False
+
+        # open_record_should
+        should = False
+        if active:
+            now_utc_naive = datetime.utcnow()
+            entry_utc_naive = as_utc_naive(active.entry_time)
+            if (now_utc_naive - entry_utc_naive).total_seconds() >= s.open_record_minutes * 60:
+                should = True
+        for et in [sch.end_time] + ([sch.end_time_2] if getattr(sch, 'end_time_2', None) else []):
+            end_dt = datetime.combine(now.date(), et, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
+            if now >= end_dt:
+                should = True
+                break
+        decisions["open_record_should"] = should
+
+    # weekly_should
+    weekly_should = (now.weekday() == s.weekly_summary_day and now.time() >= s.weekly_summary_time and s.last_weekly_sent != now.date())
+    decisions["weekly_should"] = weekly_should
+
+    return jsonify(decisions)
 
 @app.post('/admin/test-mail')
 @login_required
@@ -1600,12 +1692,14 @@ def _check_cron_token():
     if not TASKS_TOKEN or token_req != TASKS_TOKEN:
         abort(403)
 
+# --- acepta &force=1 en el tick:
 @app.get('/tasks/run-tick')
 def tasks_run_tick():
     _check_cron_token()
     try:
-        due = _job_notify_due_clockin()
-        open_ = _job_notify_open_record()
+        force = (request.args.get('force') == '1')
+        due = _job_notify_due_clockin(force=force)
+        open_ = _job_notify_open_record(force=force)
         return jsonify(ok=True, due_clockin=due, open_record=open_)
     except Exception as e:
         app.logger.exception("run-tick failed")

@@ -1,6 +1,6 @@
-// sw.js — Fichador Mochitos (PWA + Push fiable en iOS)
-// Sube la versión para forzar actualización del SW tras un deploy
-const CACHE_NAME = 'fichador-cache-v2.0.1';
+// sw.js — Fichador Mochitos (PWA + Web Push fiable)
+// Sube la versión para forzar actualización tras cada deploy
+const CACHE_NAME = 'fichador-cache-v2.0.2';
 
 // Cachea SOLO estáticos que existen de verdad
 const ASSETS = [
@@ -15,6 +15,7 @@ const ASSETS = [
     '/static/icon-192x192.png'
 ];
 
+// ===== Install =====
 self.addEventListener('install', (event) => {
     self.skipWaiting();
     event.waitUntil(
@@ -22,29 +23,27 @@ self.addEventListener('install', (event) => {
             try {
                 await cache.addAll(ASSETS);
             } catch (err) {
-                // Si algún asset falla, no tumbar la instalación del SW.
-                // iOS es sensible a fallos en addAll.
+                // Si algún asset falla, no tumbar la instalación del SW (iOS es sensible a esto)
                 console.error('[SW] Cache.addAll warning:', err);
             }
         })
     );
 });
 
+// ===== Activate =====
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         (async () => {
             const keys = await caches.keys();
-            await Promise.all(
-                keys.map(k => (k !== CACHE_NAME ? caches.delete(k) : Promise.resolve()))
-            );
+            await Promise.all(keys.map(k => (k !== CACHE_NAME ? caches.delete(k) : Promise.resolve())));
             await self.clients.claim();
         })()
     );
 });
 
-// Estrategia simple:
-// - Estáticos (css/js/img/font) => cache-first
-// - Navegaciones/API => network (sin tocar)
+// ===== Fetch =====
+// - Estáticos (style/script/image/font) => cache-first
+// - HTML y APIs => dejamos pasar (network-first natural) para no interferir con auth/login
 self.addEventListener('fetch', (event) => {
     const req = event.request;
     if (req.method !== 'GET') return;
@@ -58,7 +57,6 @@ self.addEventListener('fetch', (event) => {
             caches.match(req).then((cached) => {
                 if (cached) return cached;
                 return fetch(req).then((resp) => {
-                    // Guarda en caché una copia si es 200
                     if (resp && resp.status === 200) {
                         const clone = resp.clone();
                         caches.open(CACHE_NAME).then((c) => c.put(req, clone));
@@ -67,66 +65,65 @@ self.addEventListener('fetch', (event) => {
                 }).catch(() => cached); // si falla red, devuelve caché si había
             })
         );
-        return;
     }
-
-    // Para HTML y APIs dejamos pasar (network-first natural).
-    // No añadimos fallback aquí para no interferir con auth/login.
 });
 
-// Push: muestra notificación aunque el payload no sea JSON
+// ===== Push =====
+// Muestra notificación aunque el payload no sea JSON.
+// Añadimos timestamp y tag únicos para evitar que el SO agrupe/reemplace notificaciones.
 self.addEventListener('push', (event) => {
     let data = {};
     try {
-        if (event.data) {
-            // Algunos servicios envían string JSON, otros objetos; cubrimos ambas
-            const maybeText = event.data.text();
-            try {
-                data = JSON.parse(maybeText);
-            } catch {
-                // Si no es JSON, usamos el texto como body
-                data = { title: 'Fichador', body: maybeText };
-            }
-        }
+        data = event.data ? event.data.json() : {};
     } catch (e) {
-        // iOS puede lanzar si event.data es null
-        data = {};
+        try {
+            const t = event.data ? event.data.text() : '';
+            data = t ? { title: 'Fichador', body: t } : {};
+        } catch {
+            data = {};
+        }
     }
 
+    // Defaults sensatos
     const title = data.title || 'Fichador';
+    const payloadData = data.data || {};
+    if (!payloadData.url) payloadData.url = '/dashboard';
+
     const options = {
         body: data.body || '',
         icon: data.icon || '/static/icon-192x192.png',
         badge: data.badge || '/static/icon-72x72.png',
-        data: data.data || {},
+        data: payloadData,
         actions: Array.isArray(data.actions) && data.actions.length
             ? data.actions
-            : [{ action: 'open', title: 'Abrir' }]
+            : [{ action: 'open', title: 'Abrir fichador' }],
+        // Evita coalescing/agrupaciones del sistema
+        timestamp: Date.now(),
+        tag: `fichador-${payloadData.nid || Date.now()}`
     };
 
     event.waitUntil(self.registration.showNotification(title, options));
 });
 
-// Al pulsar la notificación, enfoca/abre el dashboard
+// ===== Notification Click =====
+// Enfoca una pestaña existente si la hay; si no, abre nueva.
+// Respeta data.url si viene del server, fallback a /dashboard.
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
-    const targetUrl = '/dashboard';
+    const targetUrl = (event.notification.data && event.notification.data.url) || '/dashboard';
 
-    event.waitUntil(
-        clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clis) => {
-            for (const client of clis) {
-                // Si ya hay una pestaña de la app abierta, fócus
-                if (client.url.includes(targetUrl) || client.url.endsWith('/') || client.url.includes('/dashboard')) {
-                    return client.focus();
-                }
-            }
-            // Si no hay, abrir nueva
-            return clients.openWindow ? clients.openWindow(targetUrl) : undefined;
-        })
-    );
+    event.waitUntil((async () => {
+        const all = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+        const hit = all.find(c =>
+            c.url.includes(targetUrl) || c.url.endsWith('/') || c.url.includes('/dashboard')
+        );
+        if (hit) return hit.focus();
+        if (clients.openWindow) return clients.openWindow(targetUrl);
+    })());
 });
 
-// (Opcional) Re-suscripción automática si cambiase el endpoint
+// ===== (Opcional) Cambios de suscripción =====
+// Normalmente no hace falta implementar nada con VAPID estable.
 self.addEventListener('pushsubscriptionchange', async () => {
-    // Normalmente no hace falta implementar nada aquí con VAPID estable.
+    // noop
 });
