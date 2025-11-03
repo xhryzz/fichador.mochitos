@@ -181,7 +181,7 @@ def _slot_resumen(s):
 # ==========================
 # Modelos
 # ==========================
-# app.py (Alrededor de la línea 193)
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(100), unique=True, nullable=False)
@@ -192,8 +192,12 @@ class User(UserMixin, db.Model):
     total_hours_required = db.Column(db.Float, default=150.0)
     schedules = db.relationship('Schedule', backref='user', lazy=True)
     time_records = db.relationship('TimeRecord', backref='user', lazy=True)
-    # NUEVO: Almacena la última vez que el usuario inició sesión
-    last_login_at = db.Column(db.DateTime(timezone=True), nullable=True) # guardado en UTC
+    last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    
+    # Agregar el nuevo campo 'status'
+    status = db.Column(db.String(50), default="Desconectado")  # En línea, Fichando, Desconectado
+
+
 
 
 class Schedule(db.Model):
@@ -469,7 +473,6 @@ def index():
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
     return render_template('index.html')
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -477,20 +480,24 @@ def login():
         password = request.form.get('password')
         user = User.query.filter_by(email=email).first()
 
-        if user.password and check_password_hash(user.password, password):
-                login_user(user)
-                # NUEVO: Actualizar last_login_at
-                user.last_login_at = utcnow()
-                db.session.commit()
-                # NUEVO: Log Discord de login
-                log_event(
-                    "🚪 Login",
-                    user=user,
-                    level="info",
-                    fields={"Email": user.email, "IP": request.remote_addr},
-                    color=0x4CAF50 # Verde
-                )
-                return redirect(url_for('dashboard'))
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            # NUEVO: Actualizar last_login_at
+            user.last_login_at = utcnow()
+            # NUEVO: Actualizar estado a "En línea"
+            user.status = "En línea"
+            db.session.commit()
+
+            # NUEVO: Log Discord de login
+            log_event(
+                "🚪 Login",
+                user=user,
+                level="info",
+                fields={"Email": user.email, "IP": request.remote_addr},
+                color=0x4CAF50  # Verde
+            )
+
+            return redirect(url_for('dashboard'))
 
         if user:
             if user.is_first_login and not user.password:
@@ -503,7 +510,9 @@ def login():
                 flash('Credenciales incorrectas', 'error')
         else:
             flash('Email no encontrado', 'error')
+
     return render_template('login.html')
+
 
 @app.route('/setup-password/<token>', methods=['GET', 'POST'])
 def set_first_password_token(token):
@@ -637,7 +646,6 @@ def dashboard():
                            weekly_required_hours=weekly_required_hours,
                            total_hours_worked=total_hours_worked,
                            total_hours_required=total_hours_required)
-
 @app.route('/clock_in', methods=['POST'])
 @login_required
 def clock_in():
@@ -654,8 +662,8 @@ def clock_in():
 
     new_record = TimeRecord(
         user_id=current_user.id,
-        date=today,  # fecha local
-        entry_time=now_loc.astimezone(timezone.utc),  # guardado en UTC
+        date=today,
+        entry_time=now_loc.astimezone(timezone.utc),
         location=location,
         latitude=latitude,
         longitude=longitude,
@@ -663,11 +671,17 @@ def clock_in():
     )
     db.session.add(new_record)
     db.session.commit()
+
+    # Cambiar el estado a "Fichando"
+    current_user.status = "Fichando"
+    db.session.commit()
+
     # Log Discord (nuevo)
     log_clock("in", new_record, user=current_user)
 
     flash('Entrada registrada correctamente', 'success')
     return redirect(url_for('dashboard'))
+
 
 @app.route('/clock_out', methods=['POST'])
 @login_required
@@ -1175,7 +1189,6 @@ def stats():
 # ==========================
 # Admin
 # ==========================
-# app.py (función admin)
 @app.route('/admin')
 @login_required
 def admin():
@@ -1184,19 +1197,31 @@ def admin():
         return redirect(url_for('dashboard'))
 
     users = User.query.all()
-    users_with_status = [] # NUEVO: Lista para pasar estado a la plantilla
+    users_with_status = []  # Lista para pasar estado a la plantilla
     for user in users:
         # Comprobar si está fichando (active record = exit_time is NULL)
         active_record = TimeRecord.query.filter_by(user_id=user.id, exit_time=None).first()
+
+        # Determinar el estado
+        if user.status == "En línea":
+            status = "En línea"
+        elif user.status == "Fichando" and active_record:
+            status = "Fichando"
+        else:
+            status = "Desconectado"
+
+        # Añadir la información del estado y si está fichando
         user_data = {
             'user': user,
-            'is_clocked_in': active_record is not None,
-            'active_record': active_record # opcional, pero útil
+            'status': status,  # Estado del usuario
+            'is_clocked_in': active_record is not None,  # Si está fichando
+            'active_record': active_record  # Opcional, para obtener detalles sobre el fichaje
         }
+
         users_with_status.append(user_data)
 
-    # return render_template('admin.html', users=users)
-    return render_template('admin.html', users=users_with_status) # CAMBIAR 'users'
+    return render_template('admin.html', users=users_with_status)  # Pasar la lista con el estado
+
 
 @app.route('/admin/create_user', methods=['POST'])
 @login_required
@@ -1367,21 +1392,28 @@ def admin_delete_record(record_id):
     flash('Fichaje eliminado correctamente', 'success')
     return redirect(url_for('admin_user_records', user_id=user_id))
 
-# app.py (Añadir esta ruta si no existe, o modificar si ya está)
 @app.route('/logout')
 @login_required
 def logout():
+    # NUEVO: Actualizar estado a "Desconectado"
+    current_user.status = "Desconectado"
+    db.session.commit()  # Guardar cambios en la base de datos
+
     # NUEVO: Log Discord antes de logout_user
     log_event(
         "👋 Logout",
         user=current_user,
         level="info",
         fields={"Email": current_user.email, "IP": request.remote_addr},
-        color=0xF44336 # Rojo
+        color=0xF44336  # Rojo
     )
+
+    # Cerrar sesión del usuario
     logout_user()
+
     flash('Sesión cerrada correctamente', 'success')
     return redirect(url_for('index'))
+
 # ==========================
 # API
 # ==========================

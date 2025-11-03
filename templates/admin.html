@@ -45,84 +45,88 @@
                 </div>
 
                 <!-- Lista de usuarios (MODIFICADA) -->
-                <h6 class="mb-3">📋 Usuarios registrados</h6>
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Nombre</th>
-                            <th>Email</th>
-                            <th>Horas totales</th>
-                            <th>Último Login</th> <!-- NUEVO -->
-                            <th>Estado</th> <!-- MODIFICADO -->
-                            <th>Rol</th>
-                            <th>Acciones</th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        {% for item in users %}
-                        {% set user = item.user %}
-                        <tr>
-                            <td>{{ user.id }}</td>
-                            <td>{{ user.name }}</td>
-                            <td>{{ user.email }}</td>
-                            <td>{{ "%.1f"|format(user.total_hours_required) }}h</td>
-                            
-                            <!-- NUEVO: Columna Último Login -->
-                            <td>
-                                {% if user.last_login_at %}
-                                <!-- Asumo que tienes un filtro |localdt para formatear la fecha/hora UTC a local -->
-                                {{ user.last_login_at|localdt('%d/%m/%Y %H:%M') }}
-                                {% else %}
-                                —
-                                {% endif %}
-                            </td>
-                            
-                            <!-- MODIFICADO: Columna Estado (incluye fichando) -->
-                            <td>
-                                {% if item.is_clocked_in %}
-                                <span class="badge bg-success">✅ Fichando</span>
-                                {% elif user.is_first_login and not user.password %}
-                                <span class="badge bg-warning">⏳ Pendiente configurar</span>
-                                {% else %}
-                                <span class="badge bg-secondary">Desconectado</span>
-                                {% endif %}
-                            </td>
-                            
-                            <td>
-                                {% if user.is_admin %}
-                                <span class="badge bg-danger">👑 Admin</span>
-                                {% else %}
-                                <span class="badge bg-primary">👤 Usuario</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                <div class="btn-group" role="group">
-                                    <a href="{{ url_for('admin_user_records', user_id=user.id) }}"
-                                       class="btn btn-sm btn-outline-primary" title="Ver fichajes">
-                                        📋
-                                    </a>
-                                    {% if user.is_first_login and not user.password %}
-                                    <a href="{{ url_for('admin_resend_email', user_id=user.id) }}"
-                                       class="btn btn-sm btn-outline-info" title="Reenviar email de configuración">
-                                        📧
-                                    </a>
-                                    {% endif %}
-                                    {% if user.id != current_user.id %}
-                                    <a href="{{ url_for('admin_delete_user', user_id=user.id) }}"
-                                       class="btn btn-sm btn-outline-danger"
-                                       onclick="return confirm('¿Eliminar a {{ user.name }}?\n\nSe eliminarán todos sus fichajes y horarios.')"
-                                       title="Eliminar usuario">
-                                        🗑️
-                                    </a>
-                                    {% endif %}
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
+<h6 class="mb-3">📋 Usuarios registrados</h6>
+<div class="table-responsive">
+    <table class="table table-hover">
+        <thead>
+        <tr>
+            <th>ID</th>
+            <th>Nombre</th>
+            <th>Email</th>
+            <th>Horas totales</th>
+            <th>Último Login</th> <!-- NUEVO -->
+            <th>Estado</th> <!-- MODIFICADO -->
+            <th>Rol</th>
+            <th>Acciones</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for item in users %}
+        {% set user = item.user %}
+        <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.name }}</td>
+            <td>{{ user.email }}</td>
+            <td>{{ "%.1f"|format(user.total_hours_required) }}h</td>
+            
+            <!-- NUEVO: Columna Último Login -->
+            <td>
+                {% if user.last_login_at %}
+                <!-- Asumo que tienes un filtro |localdt para formatear la fecha/hora UTC a local -->
+                {{ user.last_login_at|localdt('%d/%m/%Y %H:%M') }}
+                {% else %}
+                — <!-- Si no hay último login, mostramos un guion -->
+                {% endif %}
+            </td>
+            
+            <!-- MODIFICADO: Columna Estado (incluye fichando) -->
+            <td>
+                {% if item.status == 'En línea' %}
+                <span class="badge bg-success">✅ En línea</span>
+                {% elif item.is_clocked_in %}
+                <span class="badge bg-success">✅ Fichando</span>
+                {% elif item.status == 'Desconectado' %}
+                <span class="badge bg-secondary">🔴 Desconectado</span>
+                {% elif user.is_first_login and not user.password %}
+                <span class="badge bg-warning">⏳ Pendiente configurar</span>
+                {% else %}
+                <span class="badge bg-secondary">🔴 Desconectado</span>
+                {% endif %}
+            </td>
+            
+            <td>
+                {% if user.is_admin %}
+                <span class="badge bg-danger">👑 Admin</span>
+                {% else %}
+                <span class="badge bg-primary">👤 Usuario</span>
+                {% endif %}
+            </td>
+            <td>
+                <div class="btn-group" role="group">
+                    <a href="{{ url_for('admin_user_records', user_id=user.id) }}"
+                       class="btn btn-sm btn-outline-primary" title="Ver fichajes">
+                        📋
+                    </a>
+                    {% if user.is_first_login and not user.password %}
+                    <a href="{{ url_for('admin_resend_email', user_id=user.id) }}"
+                       class="btn btn-sm btn-outline-info" title="Reenviar email de configuración">
+                        📧
+                    </a>
+                    {% endif %}
+                    {% if user.id != current_user.id %}
+                    <a href="{{ url_for('admin_delete_user', user_id=user.id) }}"
+                       class="btn btn-sm btn-outline-danger"
+                       onclick="return confirm('¿Eliminar a {{ user.name }}?\n\nSe eliminarán todos sus fichajes y horarios.')"
+                       title="Eliminar usuario">
+                        🗑️
+                    </a>
+                    {% endif %}
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
                 </div>
             </div>
         </div>
