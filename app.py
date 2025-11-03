@@ -1486,61 +1486,70 @@ def init_db():
 # Jobs (notificaciones)
 # ==========================
 def _job_notify_due_clockin(now=None, force=False):
-     now = now or now_local()
-     users = User.query.all()
-     sent = 0
+    """
+    Verifica si el usuario no ha fichado entrada y envía un recordatorio.
+    """
+    now = now or now_local()  # Usar la hora actual o la proporcionada
+    users = User.query.all()  # Obtener todos los usuarios
+    sent = 0  # Contador de notificaciones enviadas
 
-     for u in users:
-         s = NotificationSettings.query.filter_by(user_id=u.id).first()
-         if not (s and s.push_enabled):
-             continue
+    for u in users:
+        # Obtener las configuraciones de notificación del usuario
+        s = NotificationSettings.query.filter_by(user_id=u.id).first()
+        if not (s and s.push_enabled):  # Si las notificaciones no están habilitadas, continuar con el siguiente usuario
+            continue
 
-         sch = today_schedule_for(u, now)
-         if not sch or not sch.is_active:
-             continue
+        # Obtener el horario del usuario para el día actual
+        sch = today_schedule_for(u, now)
+        if not sch or not sch.is_active:  # Si no tiene horario activo para hoy, continuar
+            continue
 
-         # helper
-         active_rec = active_record_for_today(u)
+        # Verificar si el usuario ya tiene un registro de fichaje activo
+        active_rec = active_record_for_today(u)
 
-         # -------- Turno 1 --------
-         planned_dt1 = datetime.combine(now.date(), sch.start_time, tzinfo=ZONE)
-         should1 = False
-         if now >= planned_dt1 + timedelta(minutes=s.minutes_after_start_no_entry):
-             # si hay fichaje activo o cualquier entrada hoy => no avisar
-             has_any_today = TimeRecord.query.filter_by(user_id=u.id, date=now.date()).first() is not None
-             if not active_rec and not has_any_today:
-                 should1 = True
+        # -------- Turno 1 --------
+        planned_dt1 = datetime.combine(now.date(), sch.start_time, tzinfo=ZONE)  # Hora planificada de entrada para turno 1
+        should1 = False  # Variable para saber si se debe enviar la notificación de entrada
 
-         if (force or should1) and (force or getattr(s, 'last_missed_entry_sent_1', None) != now.date()):
-             if send_push_to_user(u, "🔔 No has fichado y ya es hora", "Recuerda fichar la ENTRADA"):
-                 s.last_missed_entry_sent_1 = now.date()
-                 db.session.commit()
-                 sent += 1
+        if now >= planned_dt1 + timedelta(minutes=s.minutes_after_start_no_entry):  # Si ya ha pasado el tiempo de gracia para fichar
+            # Verificar si ya hay algún fichaje para el día de hoy
+            has_any_today = TimeRecord.query.filter_by(user_id=u.id, date=now.date()).first() is not None
+            if not active_rec and not has_any_today:  # Si no tiene un fichaje activo ni uno hecho hoy
+                should1 = True  # Se debería enviar la notificación
 
-         # -------- Turno 2 (opcional) --------
-         if getattr(sch, 'start_time_2', None) and getattr(sch, 'end_time_2', None):
-             planned_dt2 = datetime.combine(now.date(), sch.start_time_2, tzinfo=ZONE)
-             should2 = False
-             if now >= planned_dt2 + timedelta(minutes=s.minutes_after_start_no_entry):
-                 # si hay fichaje activo => no avisar
-                 if not active_rec:
-                     # ¿hay alguna entrada hoy que pertenezca al 2º tramo?
-                     start2_utc = planned_dt2.astimezone(timezone.utc)
-                     has_entry2 = TimeRecord.query.filter(
-                         TimeRecord.user_id == u.id,
-                         TimeRecord.date == now.date(),
-                         TimeRecord.entry_time >= start2_utc
-                     ).first() is not None
-                     if not has_entry2:
-                         should2 = True
+        # Si se cumple la condición para el turno 1 y no se ha enviado ya hoy
+        if (force or should1) and (force or getattr(s, 'last_missed_entry_sent_1', None) != now.date()):
+            if send_push_to_user(u, "🔔 No has fichado y ya es hora", "Recuerda fichar la ENTRADA"):
+                s.last_missed_entry_sent_1 = now.date()  # Marcar que se envió el recordatorio hoy
+                db.session.commit()  # Guardar los cambios
+                sent += 1  # Incrementar el contador de notificaciones enviadas
 
-             if (force or should2) and (force or getattr(s, 'last_missed_entry_sent_2', None) != now.date()):
-                 if send_push_to_user(u, "🔔 No has fichado y ya es hora", "Recuerda fichar la ENTRADA (turno de tarde)"):
-                     s.last_missed_entry_sent_2 = now.date()
-                     db.session.commit()
-                     sent += 1
+        # -------- Turno 2 (opcional) --------
+        if getattr(sch, 'start_time_2', None) and getattr(sch, 'end_time_2', None):  # Verificar si hay segundo turno
+            planned_dt2 = datetime.combine(now.date(), sch.start_time_2, tzinfo=ZONE)  # Hora planificada de entrada para turno 2
+            should2 = False  # Variable para saber si se debe enviar la notificación para el segundo turno
 
-     return sent
+            if now >= planned_dt2 + timedelta(minutes=s.minutes_after_start_no_entry):  # Si ha pasado el tiempo de gracia
+                if not active_rec:
+                    # Verificar si hay algún registro de entrada para el segundo tramo del turno
+                    start2_utc = planned_dt2.astimezone(timezone.utc)
+                    has_entry2 = TimeRecord.query.filter(
+                        TimeRecord.user_id == u.id,
+                        TimeRecord.date == now.date(),
+                        TimeRecord.entry_time >= start2_utc
+                    ).first() is not None
+                    if not has_entry2:  # Si no hay entrada registrada para el segundo turno
+                        should2 = True
+
+            # Si se cumple la condición para el segundo turno y no se ha enviado ya hoy
+            if (force or should2) and (force or getattr(s, 'last_missed_entry_sent_2', None) != now.date()):
+                if send_push_to_user(u, "🔔 No has fichado y ya es hora", "Recuerda fichar la ENTRADA (turno de tarde)"):
+                    s.last_missed_entry_sent_2 = now.date()  # Marcar que se envió el recordatorio hoy
+                    db.session.commit()  # Guardar los cambios
+                    sent += 1  # Incrementar el contador de notificaciones enviadas
+
+    return sent  # Retornar el número de notificaciones enviadas
+
 
 def as_utc_naive(dt):
     """Devuelve dt en UTC sin tzinfo (naive).
@@ -1553,48 +1562,108 @@ def as_utc_naive(dt):
 
 
 def _job_notify_open_record(now=None, force=False):
-    now = now or now_local()
-    users = User.query.all()
-    sent = 0
+    """
+    Verifica si el usuario tiene un fichaje abierto (sin salida registrada)
+    y envía un recordatorio para que cierre el fichaje si ya pasó el tiempo.
+    """
+    now = now or now_local()  # Usar la hora actual o la proporcionada
+    users = User.query.all()  # Obtener todos los usuarios
+    sent = 0  # Contador de notificaciones enviadas
 
     for u in users:
+        # Obtener la configuración de notificaciones del usuario
         s = NotificationSettings.query.filter_by(user_id=u.id).first()
-        if not (s and s.push_enabled):
+        if not (s and s.push_enabled):  # Si las notificaciones no están habilitadas, continuar con el siguiente usuario
             continue
 
+        # Obtener el registro de fichaje activo para hoy
         rec = active_record_for_today(u)
-        should = False
+        should = False  # Variable para saber si se debe enviar la notificación
 
-        # (1) Hay uno abierto desde hace >= open_record_minutes
+        # (1) Verificar si hay un fichaje abierto desde hace >= open_record_minutes
         if rec:
-            now_utc_naive = datetime.utcnow()
-            entry_utc_naive = as_utc_naive(rec.entry_time)
+            now_utc_naive = datetime.utcnow()  # Obtener la hora actual en UTC sin información de zona horaria
+            entry_utc_naive = as_utc_naive(rec.entry_time)  # Obtener la entrada del fichaje en UTC sin zona horaria
             if (now_utc_naive - entry_utc_naive).total_seconds() >= s.open_record_minutes * 60:
-                should = True
+                should = True  # Si ha pasado el tiempo de gracia, se debe enviar la notificación
 
-        # (2) Pasó fin de turno (1 o 2) + end_passed_minutes
+        # (2) Verificar si pasó el fin de turno (turno 1 o 2) y ya pasaron los minutos configurados
         sch = today_schedule_for(u, now)
         if sch:
-            end_candidates = [sch.end_time]
-            if getattr(sch, 'end_time_2', None):
-                end_candidates.append(sch.end_time_2)
+            end_candidates = [sch.end_time]  # Hora de finalización del turno 1
+            if getattr(sch, 'end_time_2', None):  # Verificar si hay un segundo turno
+                end_candidates.append(sch.end_time_2)  # Hora de finalización del turno 2
+
+            # Comprobar si la hora de fin de turno ya pasó, añadiendo el margen de minutos
             for et in end_candidates:
                 end_dt = datetime.combine(now.date(), et, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
-                if now >= end_dt:
-                    should = True
+                if now >= end_dt:  # Si ya pasó el fin de turno y el tiempo adicional configurado
+                    should = True  # Se debe enviar la notificación
                     break
 
+        # Si la condición se cumple (o si se fuerza el envío) y no se ha enviado ya hoy
         if (force or should) and (force or s.last_open_record_sent != now.date()):
             if send_push_to_user(u, "🕒 Tienes un fichaje abierto", "¿Se te ha pasado cerrar? Revísalo cuando puedas."):
-                s.last_open_record_sent = now.date()
-                db.session.commit()
-                sent += 1
+                s.last_open_record_sent = now.date()  # Marcar que se envió el recordatorio hoy
+                db.session.commit()  # Guardar los cambios
+                sent += 1  # Incrementar el contador de notificaciones enviadas
 
-    return sent
+    return sent  # Retornar el número de notificaciones enviadas
+
+
+def _job_notify_end_of_shift(now=None, force=False):
+    """
+    Verifica si el usuario ha pasado el fin de su turno y no ha fichado su salida,
+    enviando una notificación para que cierre su fichaje.
+    """
+    now = now or now_local()  # Usar la hora actual o la proporcionada
+    users = User.query.all()  # Obtener todos los usuarios
+    sent = 0  # Contador de notificaciones enviadas
+
+    for u in users:
+        # Obtener la configuración de notificaciones del usuario
+        s = NotificationSettings.query.filter_by(user_id=u.id).first()
+        if not (s and s.push_enabled):  # Si las notificaciones no están habilitadas, continuar con el siguiente usuario
+            continue
+
+        # Obtener el registro de fichaje activo para hoy
+        active_rec = active_record_for_today(u)
+        if not active_rec:
+            continue  # Si no hay un fichaje activo, continuar con el siguiente usuario
+
+        # Obtener el horario de trabajo del usuario para el día de hoy
+        sch = today_schedule_for(u, now)
+        if not sch:  # Si no hay un horario configurado para el día de hoy, continuar
+            continue
+
+        # Comprobar si ya pasó el tiempo de fin de turno para el turno 1
+        end_candidates = [sch.end_time]  # Hora de fin de turno del primer turno
+        if getattr(sch, 'end_time_2', None):  # Si existe un segundo turno
+            end_candidates.append(sch.end_time_2)  # Hora de fin del segundo turno
+
+        should_send = False  # Variable que determina si se debe enviar la notificación
+
+        for et in end_candidates:
+            end_dt = datetime.combine(now.date(), et, tzinfo=ZONE) + timedelta(minutes=s.end_passed_minutes)
+            if now >= end_dt:  # Si ya ha pasado el fin de turno + los minutos adicionales configurados
+                should_send = True
+                break
+
+        # Si se cumple la condición (o se fuerza el envío) y no se ha enviado la notificación hoy
+        if (force or should_send) and (force or s.last_open_record_sent != now.date()):
+            if send_push_to_user(u, "🔔 Tu turno ha terminado", "Recuerda fichar tu salida si ya has terminado."):
+                s.last_open_record_sent = now.date()  # Marcar que se envió el recordatorio hoy
+                db.session.commit()  # Guardar los cambios
+                sent += 1  # Incrementar el contador de notificaciones enviadas
+
+    return sent  # Retornar el número de notificaciones enviadas
 
 
 def _job_weekly_summary(now=None, force=False, user_id=None):
+    # Obtener la hora y fecha actuales
     current = now or now_local()
+
+    # Filtrar usuarios si se pasa un user_id, de lo contrario se obtiene a todos los usuarios
     qs = User.query
     if user_id:
         qs = qs.filter_by(id=user_id)
@@ -1602,25 +1671,38 @@ def _job_weekly_summary(now=None, force=False, user_id=None):
 
     sent = 0
     for u in users:
+        # Obtener la configuración de notificaciones del usuario
         s = NotificationSettings.query.filter_by(user_id=u.id).first()
         if not (s and s.push_enabled):
-            continue
+            continue  # Si las notificaciones no están habilitadas, saltar a otro usuario
 
+        # Comprobar si ya se ha enviado el resumen semanal hoy
         already_today = (s.last_weekly_sent == current.date())
-        cond = (current.weekday() == s.weekly_summary_day
-                and current.time() >= s.weekly_summary_time
-                and not already_today)
+        
+        # Condición para saber si el resumen semanal debe ser enviado
+        cond = (
+            current.weekday() == s.weekly_summary_day  # Día correcto de la semana
+            and current.time() >= s.weekly_summary_time  # Hora del día correcta
+            and not already_today  # Asegurarse de que no se haya enviado aún hoy
+        )
 
+        # Si la condición se cumple o se fuerza el envío
         if force or cond:
-            total_required = getattr(u, "total_hours_required", 150.0) or 150.0
-            done = hours_worked_total(u)
-            remaining = max(total_required - done, 0.0)
+            # Obtener las horas requeridas y trabajadas
+            total_required = getattr(u, "total_hours_required", 150.0)  # Si no está configurado, se usa 150h por defecto
+            done = hours_worked_total(u)  # Total de horas trabajadas
+            remaining = max(total_required - done, 0.0)  # Horas restantes
+
+            # Enviar el resumen semanal al usuario
             if send_push_to_user(u, "📊 Resumen semanal",
                                  f"Te quedan {remaining:.1f} h para finalizar las prácticas (hechas {done:.1f}/{total_required:.1f})."):
+                # Actualizar la fecha de envío del resumen semanal
                 s.last_weekly_sent = current.date()
                 db.session.commit()
-                sent += 1
-    return sent
+                sent += 1  # Incrementar el contador de envíos exitosos
+
+    return sent  # Retornar el número total de resúmenes enviados
+
 
 @app.get('/me/notify-dry-run')
 @login_required
