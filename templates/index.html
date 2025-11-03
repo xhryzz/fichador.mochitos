@@ -11,12 +11,12 @@
                 <div class="avatar-container mb-4">
                     <div class="avatar-group">
                         <div class="avatar avatar-her">
-                            <img src="https://media.discordapp.net/attachments/1237512601907494973/1422270435348971530/IMG_5105.jpg?ex=6906e8d0&is=69059750&hm=7d53d63f2fa27e982264bcd1e343e00a16019f0fe86ea39df5dbe3f417b06e85&=&format=webp&width=648&height=864" 
+                            <img src="{{ url_for('static', filename='mochi/1.png') }}"
                                  alt="Clara" class="avatar-img">
                             <div class="avatar-badge"></div>
                         </div>
                         <div class="avatar avatar-him">
-                            <img src="https://media.discordapp.net/attachments/1237512601907494973/1415605345807499264/IMG_3146.jpg?ex=69070d37&is=6905bbb7&hm=6ec4f86e20fd29041fedefc5988917d8275a7cee389bdfc477b7fdb107496d56&=&format=webp&width=726&height=968" 
+                            <img src="{{ url_for('static', filename='mochi/2.png') }}"
                                  alt="Christian" class="avatar-img">
                             <div class="avatar-badge"></div>
                         </div>
@@ -43,6 +43,7 @@
                 </div>
                 {% endif %}
             </div>
+
 
             <!-- Features Grid -->
             <div class="row features-grid mt-5">
