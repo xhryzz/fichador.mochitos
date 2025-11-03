@@ -44,7 +44,7 @@
                     </div>
                 </div>
 
-                <!-- Lista de usuarios -->
+                <!-- Lista de usuarios (MODIFICADA) -->
                 <h6 class="mb-3">📋 Usuarios registrados</h6>
                 <div class="table-responsive">
                     <table class="table table-hover">
@@ -54,25 +54,42 @@
                             <th>Nombre</th>
                             <th>Email</th>
                             <th>Horas totales</th>
-                            <th>Estado</th>
+                            <th>Último Login</th> <!-- NUEVO -->
+                            <th>Estado</th> <!-- MODIFICADO -->
                             <th>Rol</th>
                             <th>Acciones</th>
                         </tr>
                         </thead>
                         <tbody>
-                        {% for user in users %}
+                        {% for item in users %}
+                        {% set user = item.user %}
                         <tr>
                             <td>{{ user.id }}</td>
                             <td>{{ user.name }}</td>
                             <td>{{ user.email }}</td>
                             <td>{{ "%.1f"|format(user.total_hours_required) }}h</td>
+                            
+                            <!-- NUEVO: Columna Último Login -->
                             <td>
-                                {% if user.is_first_login %}
-                                <span class="badge bg-warning">⏳ Pendiente configurar</span>
+                                {% if user.last_login_at %}
+                                <!-- Asumo que tienes un filtro |localdt para formatear la fecha/hora UTC a local -->
+                                {{ user.last_login_at|localdt('%d/%m/%Y %H:%M') }}
                                 {% else %}
-                                <span class="badge bg-success">✅ Activo</span>
+                                —
                                 {% endif %}
                             </td>
+                            
+                            <!-- MODIFICADO: Columna Estado (incluye fichando) -->
+                            <td>
+                                {% if item.is_clocked_in %}
+                                <span class="badge bg-success">✅ Fichando</span>
+                                {% elif user.is_first_login and not user.password %}
+                                <span class="badge bg-warning">⏳ Pendiente configurar</span>
+                                {% else %}
+                                <span class="badge bg-secondary">Desconectado</span>
+                                {% endif %}
+                            </td>
+                            
                             <td>
                                 {% if user.is_admin %}
                                 <span class="badge bg-danger">👑 Admin</span>

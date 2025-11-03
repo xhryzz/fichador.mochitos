@@ -181,16 +181,19 @@ def _slot_resumen(s):
 # ==========================
 # Modelos
 # ==========================
+# app.py (Alrededor de la línea 193)
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(100), unique=True, nullable=False)
-    password = db.Column(db.String(255), nullable=True)  # <-- antes 100
+    password = db.Column(db.String(255), nullable=True)
     name = db.Column(db.String(100), nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
     is_first_login = db.Column(db.Boolean, default=True)
     total_hours_required = db.Column(db.Float, default=150.0)
     schedules = db.relationship('Schedule', backref='user', lazy=True)
     time_records = db.relationship('TimeRecord', backref='user', lazy=True)
+    # NUEVO: Almacena la última vez que el usuario inició sesión
+    last_login_at = db.Column(db.DateTime(timezone=True), nullable=True) # guardado en UTC
 
 
 class Schedule(db.Model):
@@ -419,6 +422,13 @@ def upgrade_db():
                 db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_1 DATE NULL"))
             if "last_missed_entry_sent_2" not in names:
                 db.session.execute(text("ALTER TABLE notification_settings ADD COLUMN last_missed_entry_sent_2 DATE NULL"))
+            
+            # NUEVO: Para la tabla user
+            cols = db.session.execute(text("PRAGMA table_info(user);")).fetchall()
+            names = {c[1] for c in cols}
+            # AÑADIR CAMPO last_login_at
+            if "last_login_at" not in names:
+                db.session.execute(text("ALTER TABLE user ADD COLUMN last_login_at DATETIME")) # Tipo DATETIME para SQLite
 
             # En SQLite el tamaño de VARCHAR no se aplica realmente, así que no hace falta ALTER para password/email
             db.session.commit()
@@ -429,6 +439,9 @@ def upgrade_db():
             stmts = [
                 'ALTER TABLE "user" ALTER COLUMN password TYPE VARCHAR(255)',
                 'ALTER TABLE "user" ALTER COLUMN email TYPE VARCHAR(255)',
+                # AÑADIR CAMPO last_login_at
+                "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE NULL",
+                
                 "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS start_time_2 TIME NULL",
                 "ALTER TABLE schedule ADD COLUMN IF NOT EXISTS end_time_2 TIME NULL",
                 "ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS last_missed_entry_sent_1 DATE NULL",
@@ -440,7 +453,6 @@ def upgrade_db():
                 except Exception as e:
                     print(f"⚠️ upgrade_db postgres: {e}")
             db.session.commit()
-
 
 # ==========================
 # Contexto Jinja
@@ -464,6 +476,21 @@ def login():
         email = request.form.get('email')
         password = request.form.get('password')
         user = User.query.filter_by(email=email).first()
+
+        if user.password and check_password_hash(user.password, password):
+                login_user(user)
+                # NUEVO: Actualizar last_login_at
+                user.last_login_at = utcnow()
+                db.session.commit()
+                # NUEVO: Log Discord de login
+                log_event(
+                    "🚪 Login",
+                    user=user,
+                    level="info",
+                    fields={"Email": user.email, "IP": request.remote_addr},
+                    color=0x4CAF50 # Verde
+                )
+                return redirect(url_for('dashboard'))
 
         if user:
             if user.is_first_login and not user.password:
@@ -1148,14 +1175,28 @@ def stats():
 # ==========================
 # Admin
 # ==========================
+# app.py (función admin)
 @app.route('/admin')
 @login_required
 def admin():
     if not current_user.is_admin:
         flash('No tienes permisos de administrador', 'error')
         return redirect(url_for('dashboard'))
+
     users = User.query.all()
-    return render_template('admin.html', users=users)
+    users_with_status = [] # NUEVO: Lista para pasar estado a la plantilla
+    for user in users:
+        # Comprobar si está fichando (active record = exit_time is NULL)
+        active_record = TimeRecord.query.filter_by(user_id=user.id, exit_time=None).first()
+        user_data = {
+            'user': user,
+            'is_clocked_in': active_record is not None,
+            'active_record': active_record # opcional, pero útil
+        }
+        users_with_status.append(user_data)
+
+    # return render_template('admin.html', users=users)
+    return render_template('admin.html', users=users_with_status) # CAMBIAR 'users'
 
 @app.route('/admin/create_user', methods=['POST'])
 @login_required
@@ -1326,12 +1367,21 @@ def admin_delete_record(record_id):
     flash('Fichaje eliminado correctamente', 'success')
     return redirect(url_for('admin_user_records', user_id=user_id))
 
+# app.py (Añadir esta ruta si no existe, o modificar si ya está)
 @app.route('/logout')
 @login_required
 def logout():
+    # NUEVO: Log Discord antes de logout_user
+    log_event(
+        "👋 Logout",
+        user=current_user,
+        level="info",
+        fields={"Email": current_user.email, "IP": request.remote_addr},
+        color=0xF44336 # Rojo
+    )
     logout_user()
+    flash('Sesión cerrada correctamente', 'success')
     return redirect(url_for('index'))
-
 # ==========================
 # API
 # ==========================
