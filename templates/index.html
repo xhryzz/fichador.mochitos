@@ -1,242 +1,172 @@
 {% extends "base.html" %}
-
 {% block title %}Inicio{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <div class="row justify-content-center align-items-center min-vh-100">
-        <div class="col-12 col-lg-10">
-            <!-- Hero Section -->
-            <div class="text-center mb-5 fade-in-up">
-                <div class="avatar-container mb-4">
-                    <div class="avatar-group">
-                        <div class="avatar avatar-her">
-                            <img src="{{ url_for('static', filename='mochi/1.png') }}"
-                                 alt="Clara" class="avatar-img">
-                            <div class="avatar-badge"></div>
-                        </div>
-                        <div class="avatar avatar-him">
-                            <img src="{{ url_for('static', filename='mochi/2.png') }}"
-                                 alt="Christian" class="avatar-img">
-                            <div class="avatar-badge"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <h1 class="display-4 fw-bold mb-3 gradient-text">Bienvenidos al Fichador</h1>
-                <p class="lead text-muted mb-4">Controla tus horarios de prácticas de manera sencilla y eficiente</p>
-                
-                {% if not current_user.is_authenticated %}
-                <div class="cta-buttons mt-4">
-                    <a href="{{ url_for('login') }}" class="btn btn-primary btn-lg me-3 pulse">
-                        <i class="fas fa-sign-in-alt me-2"></i> Iniciar Sesión
-                    </a>
-                    <a href="{{ url_for('register') }}" class="btn btn-outline-primary btn-lg">
-                        <i class="fas fa-user-plus me-2"></i> Registrarse
-                    </a>
-                </div>
-                {% else %}
-                <div class="cta-buttons mt-4">
-                    <a href="{{ url_for('dashboard') }}" class="btn btn-primary btn-lg pulse">
-                        <i class="fas fa-tachometer-alt me-2"></i> Ir al Dashboard
-                    </a>
-                </div>
-                {% endif %}
-            </div>
-
-
-            <!-- Features Grid -->
-            <div class="row features-grid mt-5">
-                <div class="col-md-4 mb-4">
-                    <div class="feature-card card h-100 fade-in-up" style="animation-delay: 0.1s">
-                        <div class="card-body text-center p-4">
-                            <div class="feature-icon mb-3">
-                                <i class="fas fa-clock"></i>
-                            </div>
-                            <h5 class="fw-bold">Fichaje Inteligente</h5>
-                            <p class="text-muted">Registra tu entrada y salida con geolocalización automática</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4 mb-4">
-                    <div class="feature-card card h-100 fade-in-up" style="animation-delay: 0.2s">
-                        <div class="card-body text-center p-4">
-                            <div class="feature-icon mb-3">
-                                <i class="fas fa-chart-line"></i>
-                            </div>
-                            <h5 class="fw-bold">Estadísticas</h5>
-                            <p class="text-muted">Visualiza tus horas trabajadas con gráficos interactivos</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4 mb-4">
-                    <div class="feature-card card h-100 fade-in-up" style="animation-delay: 0.3s">
-                        <div class="card-body text-center p-4">
-                            <div class="feature-icon mb-3">
-                                <i class="fas fa-file-export"></i>
-                            </div>
-                            <h5 class="fw-bold">Informes</h5>
-                            <p class="text-muted">Genera reportes detallados en PDF y CSV</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+<div class="container">
+  <!-- HERO -->
+  <section class="hero fade-in">
+    <div class="hero-avatars">
+      <div class="avatar-bubble">
+        <img src="{{ url_for('static', filename='mochi/1.png') }}" alt="Clara">
+      </div>
+      <div class="avatar-bubble overlapped">
+        <img src="{{ url_for('static', filename='mochi/2.png') }}" alt="Christian">
+      </div>
     </div>
+
+    <h1 class="hero-title">Fichador de prácticas</h1>
+    <p class="hero-subtitle">Ligero, claro y pensado para vuestro día a día.</p>
+
+    {% if not current_user.is_authenticated %}
+      <div class="cta">
+        <a href="{{ url_for('login') }}" class="btn btn-primary">
+          <i class="fas fa-sign-in-alt me-2"></i> Iniciar sesión
+        </a>
+        <a href="{{ url_for('register') }}" class="btn btn-success">
+          <i class="fas fa-user-plus me-2"></i> Registrarse
+        </a>
+      </div>
+    {% else %}
+      <div class="cta">
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
+          <i class="fas fa-tachometer-alt me-2"></i> Ir al Dashboard
+        </a>
+        <a href="{{ url_for('user_add_record') }}" class="btn btn-success">
+          <i class="fas fa-play-circle me-2"></i> Fichar ahora
+        </a>
+      </div>
+    {% endif %}
+
+    <div class="chips">
+      <span class="badge">PWA lista</span>
+      <span class="badge">Geolocalización</span>
+      <span class="badge">PDF & CSV</span>
+    </div>
+  </section>
+
+  <!-- QUICK STATS / FEATURES -->
+  <section class="row g-3">
+    <div class="col-md-4">
+      <div class="card lift">
+        <div class="card-body text-center">
+          <div class="icon-ring"><i class="fas fa-clock"></i></div>
+          <h5 class="mb-1">Fichaje inteligente</h5>
+          <p class="text-muted mb-0">Entrada/Salida con ubicación y validaciones suaves.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card lift">
+        <div class="card-body text-center">
+          <div class="icon-ring"><i class="fas fa-chart-line"></i></div>
+          <h5 class="mb-1">Estadísticas claras</h5>
+          <p class="text-muted mb-0">Horas por día/semana y progreso de objetivos.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card lift">
+        <div class="card-body text-center">
+          <div class="icon-ring"><i class="fas fa-file-export"></i></div>
+          <h5 class="mb-1">Informes bonitos</h5>
+          <p class="text-muted mb-0">Exporta a PDF/CSV con un clic.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- QUICK ACTIONS -->
+  {% if current_user.is_authenticated %}
+  <section class="row g-3 mt-1">
+    <div class="col-md-6">
+      <div class="card soft">
+        <div class="card-body d-flex align-items-center justify-content-between">
+          <div>
+            <h6 class="text-muted mb-1">Atajo rápido</h6>
+            <h4 class="mb-1">Ver mis registros</h4>
+            <p class="text-muted mb-0">Revisa, edita o borra fichajes fácilmente.</p>
+          </div>
+          <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Abrir</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card soft">
+        <div class="card-body d-flex align-items-center justify-content-between">
+          <div>
+            <h6 class="text-muted mb-1">Configuración</h6>
+            <h4 class="mb-1">Horario & notificaciones</h4>
+            <p class="text-muted mb-0">Define turnos y alertas (PWA) sin complicaciones.</p>
+          </div>
+          <a href="{{ url_for('dashboard') }}#settings" class="btn btn-success">Configurar</a>
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
 </div>
 
 <style>
-.min-vh-100 {
-    min-height: 100vh;
+/* --- HERO --- */
+.hero{
+  background: var(--bg-sec);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2.2rem 1.6rem;
+  margin: 1rem 0 1.5rem 0;
+  text-align: center;
+}
+.hero-avatars{
+  display:flex; justify-content:center; align-items:center; margin-bottom:1rem;
+}
+.avatar-bubble{
+  width:110px; height:110px; border-radius:50%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0,0,0,.08);
+  overflow:hidden; display:flex; align-items:center; justify-content:center;
+  transition: transform .2s ease;
+}
+.avatar-bubble img{ width:100%; height:100%; object-fit:cover; }
+.avatar-bubble.overlapped{ margin-left:-18px }
+.avatar-bubble:hover{ transform: translateY(-2px) }
+
+.hero-title{
+  font-weight: 800;
+  letter-spacing: -.3px;
+  margin: .5rem 0 .25rem 0;
+}
+.hero-subtitle{
+  color: var(--text-sec);
+  margin-bottom: 1rem;
+}
+.cta{ display:flex; gap:.6rem; justify-content:center; flex-wrap:wrap; margin-bottom:.6rem; }
+.chips{ display:flex; gap:.4rem; justify-content:center; flex-wrap:wrap; }
+
+/* --- CARDS / ICONS --- */
+.lift{ transition: transform .2s ease, box-shadow .2s ease; }
+.lift:hover{ transform: translateY(-3px); box-shadow: 0 14px 40px rgba(0,0,0,.08); }
+
+.soft{ background: var(--bg); }
+.icon-ring{
+  width:64px;height:64px;border-radius:50%;
+  background: var(--bg-sec);
+  border: 1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:1.3rem;margin:0 auto .6rem auto;
+  color: var(--primary);
 }
 
-/* Avatar Styles */
-.avatar-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
+/* --- ANIM --- */
+.fade-in{ animation: fadeIn .35s ease both; }
+@keyframes fadeIn{ from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none} }
 
-.avatar-group {
-    display: flex;
-    align-items: center;
-    position: relative;
-}
-
-.avatar {
-    width: 120px;
-    height: 120px;
-    border-radius: 50%;
-    position: relative;
-    border: 4px solid var(--background-primary);
-    box-shadow: var(--card-shadow);
-    transition: var(--transition);
-}
-
-.avatar:hover {
-    transform: scale(1.05);
-    box-shadow: var(--card-shadow-hover);
-}
-
-.avatar-her {
-    z-index: 2;
-    margin-right: -20px;
-}
-
-.avatar-him {
-    z-index: 1;
-}
-
-.avatar-img {
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    object-fit: cover;
-}
-
-.avatar-badge {
-    position: absolute;
-    bottom: 5px;
-    right: 5px;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    border: 2px solid var(--background-primary);
-}
-
-.avatar-her .avatar-badge {
-    background: linear-gradient(135deg, #FF6B9D, #FF8E53);
-}
-
-.avatar-him .avatar-badge {
-    background: linear-gradient(135deg, #4FACFE, #00F2FE);
-}
-
-/* Gradient Text */
-.gradient-text {
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-/* Feature Cards */
-.feature-card {
-    border: none;
-    background: var(--background-tertiary);
-    transition: var(--transition);
-}
-
-.feature-card:hover {
-    transform: translateY(-5px);
-}
-
-.feature-icon {
-    width: 70px;
-    height: 70px;
-    margin: 0 auto;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-    color: white;
-    font-size: 1.5rem;
-}
-
-/* CTA Buttons */
-.cta-buttons {
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-    flex-wrap: wrap;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .avatar {
-        width: 100px;
-        height: 100px;
-    }
-    
-    .avatar-her {
-        margin-right: -15px;
-    }
-    
-    .display-4 {
-        font-size: 2.5rem;
-    }
-    
-    .cta-buttons {
-        flex-direction: column;
-        align-items: center;
-    }
-    
-    .cta-buttons .btn {
-        width: 200px;
-    }
-}
-
-/* Animation for avatar group */
-@keyframes float {
-    0%, 100% {
-        transform: translateY(0);
-    }
-    50% {
-        transform: translateY(-10px);
-    }
-}
-
-.avatar-group {
-    animation: float 6s ease-in-out infinite;
-}
-
-.avatar-her {
-    animation-delay: 0s;
-}
-
-.avatar-him {
-    animation-delay: 3s;
+/* --- RESPONSIVE --- */
+@media (max-width:768px){
+  .avatar-bubble{ width:92px; height:92px; }
 }
 </style>
 {% endblock %}
