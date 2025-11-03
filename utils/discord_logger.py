@@ -43,8 +43,8 @@ def _actor_name(u):
 def log_event(title: str, description: str = "", *, level="info",
               fields: dict | None = None, user=None, content: str | None = None,
               username: str | None = "Fichador · Auditoría", avatar_url: str | None = None,
-              footer: str | None = None):
-    color = PALETTE.get(level, PALETTE["neutral"])
+              footer: str | None = None, color=None):
+    color = color or PALETTE.get(level, PALETTE["neutral"])
     ip, endpoint, method = "server", "-", "-"
     if has_request_context():
         try:
