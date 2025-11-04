@@ -54,8 +54,10 @@
             <th>Nombre</th>
             <th>Email</th>
             <th>Horas totales</th>
-            <th>Último Login</th> <!-- NUEVO -->
-            <th>Estado</th> <!-- MODIFICADO -->
+            <th>Último Login</th>
+            <th>Estado</th>
+            <th>Fichaje Actual</th> <!-- NUEVA COLUMNA -->
+            <th>Último Cierre</th> <!-- NUEVA COLUMNA -->
             <th>Rol</th>
             <th>Acciones</th>
         </tr>
@@ -68,18 +70,17 @@
             <td>{{ user.name }}</td>
             <td>{{ user.email }}</td>
             <td>{{ "%.1f"|format(user.total_hours_required) }}h</td>
-            
-            <!-- NUEVO: Columna Último Login -->
+
+            <!-- Columna Último Login -->
             <td>
                 {% if user.last_login_at %}
-                <!-- Asumo que tienes un filtro |localdt para formatear la fecha/hora UTC a local -->
                 {{ user.last_login_at|localdt('%d/%m/%Y %H:%M') }}
                 {% else %}
-                — <!-- Si no hay último login, mostramos un guion -->
+                —
                 {% endif %}
             </td>
-            
-            <!-- MODIFICADO: Columna Estado (incluye fichando) -->
+
+            <!-- Columna Estado -->
             <td>
                 {% if item.status == 'En línea' %}
                 <span class="badge bg-success">✅ En línea</span>
@@ -93,7 +94,30 @@
                 <span class="badge bg-secondary">🔴 Desconectado</span>
                 {% endif %}
             </td>
-            
+
+            <!-- NUEVA: Columna Fichaje Actual -->
+            <td>
+                {% if item.current_clock_in %}
+                <span class="text-success">
+                    🕐 {{ item.current_clock_in|localdt('%H:%M') }}
+                    <small class="text-muted">({{ item.hours_clocked }})</small>
+                </span>
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+
+            <!-- NUEVA: Columna Último Cierre -->
+            <td>
+                {% if item.last_clock_out %}
+                <span class="text-muted">
+                    {{ item.last_clock_out|localdt('%d/%m %H:%M') }}
+                </span>
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+
             <td>
                 {% if user.is_admin %}
                 <span class="badge bg-danger">👑 Admin</span>

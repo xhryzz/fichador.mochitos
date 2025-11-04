@@ -1189,6 +1189,7 @@ def stats():
 # ==========================
 # Admin
 # ==========================
+
 @app.route('/admin')
 @login_required
 def admin():
@@ -1210,18 +1211,42 @@ def admin():
         else:
             status = "Desconectado"
 
+        # NUEVO: Calcular tiempo fichado actual
+        current_clock_in = None
+        hours_clocked = None
+        if active_record:
+            current_clock_in = active_record.entry_time
+            # Calcular tiempo transcurrido
+            now = utcnow()
+            elapsed = now - active_record.entry_time
+            hours = int(elapsed.total_seconds() // 3600)
+            minutes = int((elapsed.total_seconds() % 3600) // 60)
+            hours_clocked = f"{hours}h {minutes}m"
+
+        # NUEVO: Obtener último cierre de fichaje
+        last_clock_out = None
+        last_closed_record = TimeRecord.query.filter(
+            TimeRecord.user_id == user.id,
+            TimeRecord.exit_time.isnot(None)
+        ).order_by(TimeRecord.exit_time.desc()).first()
+
+        if last_closed_record:
+            last_clock_out = last_closed_record.exit_time
+
         # Añadir la información del estado y si está fichando
         user_data = {
             'user': user,
             'status': status,  # Estado del usuario
             'is_clocked_in': active_record is not None,  # Si está fichando
-            'active_record': active_record  # Opcional, para obtener detalles sobre el fichaje
+            'active_record': active_record,  # Opcional, para obtener detalles sobre el fichaje
+            'current_clock_in': current_clock_in,  # NUEVO: hora de inicio del fichaje actual
+            'hours_clocked': hours_clocked,  # NUEVO: tiempo transcurrido formateado
+            'last_clock_out': last_clock_out  # NUEVO: último cierre de fichaje
         }
 
         users_with_status.append(user_data)
 
     return render_template('admin.html', users=users_with_status)  # Pasar la lista con el estado
-
 
 @app.route('/admin/create_user', methods=['POST'])
 @login_required
