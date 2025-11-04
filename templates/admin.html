@@ -103,10 +103,10 @@
             </td>
             <td>
                 <div class="btn-group" role="group">
-                    <a href="{{ url_for('admin_user_dashboard', user_id=user.id) }}"
-                        class="btn btn-sm btn-outline-primary" title="Panel completo">
-                            📋
-                        </a>
+                    <a href="{{ url_for('admin_user_records', user_id=user.id) }}"
+                       class="btn btn-sm btn-outline-primary" title="Ver fichajes">
+                        📋
+                    </a>
                     {% if user.is_first_login and not user.password %}
                     <a href="{{ url_for('admin_resend_email', user_id=user.id) }}"
                        class="btn btn-sm btn-outline-info" title="Reenviar email de configuración">
