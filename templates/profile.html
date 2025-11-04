@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Perfil de {{ user.username }} - Gym Tracker{% endblock %}
+
+{% block content %}
+<div class="profile-header">
+    <h1>Perfil de {{ user.username }}</h1>
+    <p><strong>Código:</strong> {{ user.friend_code }}</p>
+</div>
+
+<div class="profile-sections">
+    <div class="profile-section">
+        <h2>Entrenamientos Recientes</h2>
+        {% if workouts %}
+        <ul class="item-list">
+            {% for workout in workouts %}
+            <li>
+                <strong>{{ workout.name }}</strong> - {{ workout.date.strftime('%d/%m/%Y') }}
+                <span class="badge">{{ workout.exercise_entries|length }} ejercicios</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p>No hay entrenamientos registrados.</p>
+        {% endif %}
+    </div>
+
+    <div class="profile-section">
+        <h2>Rutinas</h2>
+        {% if routines %}
+        <ul class="item-list">
+            {% for routine in routines %}
+            <li><strong>{{ routine.name }}</strong> - {{ routine.description }}</li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p>No hay rutinas registradas.</p>
+        {% endif %}
+    </div>
+
+    <div class="profile-section">
+        <h2>Comidas Recientes</h2>
+        {% if meals %}
+        <ul class="item-list">
+            {% for meal in meals %}
+            <li>
+                <strong>{{ meal.name }}</strong> - {{ meal.calories }} kcal
+                <span class="badge">{{ meal.meal_time }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p>No hay comidas registradas.</p>
+        {% endif %}
+    </div>
+
+    <div class="profile-section">
+        <h2>Dietas</h2>
+        {% if diets %}
+        <ul class="item-list">
+            {% for diet in diets %}
+            <li>
+                <strong>{{ diet.name }}</strong>
+                {% if diet.target_calories %}- {{ diet.target_calories }} kcal/día{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p>No hay dietas registradas.</p>
+        {% endif %}
+    </div>
+</div>
+
+<a href="{{ url_for('friends') }}" class="btn btn-secondary">Volver a Amigos</a>
+{% endblock %}

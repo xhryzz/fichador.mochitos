@@ -1,0 +1,536 @@
+{% extends "base.html" %}
+
+{% block title %}Ejercicios - Gym Tracker{% endblock %}
+
+{% block content %}
+<div class="exercises-page">
+    <div class="page-header">
+        <div class="header-content">
+            <h1>Mis Ejercicios</h1>
+            <p>Gestiona tu biblioteca personal de ejercicios</p>
+        </div>
+        <button class="btn btn-primary btn-with-icon" onclick="openModal()">
+            <span class="btn-icon">+</span>
+            Añadir Ejercicio
+        </button>
+    </div>
+
+    <div class="filters-section">
+        <div class="search-box">
+            <input type="text" id="exerciseSearch" placeholder="Buscar ejercicios..." onkeyup="filterExercises()">
+            <span class="search-icon">🔍</span>
+        </div>
+        <div class="filter-group">
+            <select id="muscleFilter" onchange="filterExercises()">
+                <option value="">Todos los grupos musculares</option>
+                <option value="Pecho">Pecho</option>
+                <option value="Espalda">Espalda</option>
+                <option value="Piernas">Piernas</option>
+                <option value="Hombros">Hombros</option>
+                <option value="Brazos">Brazos</option>
+                <option value="Abdomen">Abdomen</option>
+                <option value="Cardio">Cardio</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Modal para añadir ejercicio -->
+    <div id="addForm" class="modal" style="display: {% if form.errors %}block{% else %}none{% endif %};">
+        <div class="modal-overlay" onclick="closeModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Nuevo Ejercicio</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <form method="POST" action="{{ url_for('add_exercise') }}" class="modal-form">
+                {{ form.hidden_tag() }}
+                <div class="form-group">
+                    <label for="name">{{ form.name.label }}</label>
+                    {{ form.name(class="form-control", placeholder="Ej: Press de banca") }}
+                    {% if form.name.errors %}
+                    <div class="form-errors">
+                        {% for error in form.name.errors %}
+                        <span class="error-text">{{ error }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    <label for="muscle_group">{{ form.muscle_group.label }}</label>
+                    {{ form.muscle_group(class="form-control") }}
+                    {% if form.muscle_group.errors %}
+                    <div class="form-errors">
+                        {% for error in form.muscle_group.errors %}
+                        <span class="error-text">{{ error }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    <label for="description">{{ form.description.label }}</label>
+                    {{ form.description(class="form-control", rows="4", placeholder="Describe cómo realizar el ejercicio...") }}
+                    {% if form.description.errors %}
+                    <div class="form-errors">
+                        {% for error in form.description.errors %}
+                        <span class="error-text">{{ error }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Ejercicio</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if exercises %}
+    <div class="exercises-grid" id="exercisesGrid">
+        {% for exercise in exercises %}
+        <div class="exercise-card" data-muscle="{{ exercise.muscle_group }}">
+            <div class="card-header">
+                <h3>{{ exercise.name }}</h3>
+                <span class="muscle-badge muscle-{{ exercise.muscle_group|lower|replace(' ', '-') }}">{{ exercise.muscle_group }}</span>
+            </div>
+            <div class="card-body">
+                <p class="exercise-description">{{ exercise.description or "Sin descripción" }}</p>
+            </div>
+            <div class="card-footer">
+                <a href="{{ url_for('delete_exercise', id=exercise.id) }}" class="btn btn-danger btn-sm" onclick="return confirmDelete()">
+                    <span class="btn-icon">🗑️</span>
+                    Eliminar
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">💪</div>
+        <h3>No tienes ejercicios registrados</h3>
+        <p>Comienza creando tu primer ejercicio para construir tu biblioteca personal.</p>
+        <button class="btn btn-primary btn-with-icon" onclick="openModal()">
+            <span class="btn-icon">+</span>
+            Crear Primer Ejercicio
+        </button>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    /* Todos los estilos CSS que te proporcioné anteriormente */
+    .exercises-page {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 20px;
+    }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--gray-light);
+    }
+
+    .header-content h1 {
+        font-size: 2.2rem;
+        margin-bottom: 8px;
+        color: var(--dark);
+        font-weight: 700;
+    }
+
+    .header-content p {
+        color: var(--gray);
+        margin: 0;
+    }
+
+    .btn-with-icon {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .btn-icon {
+        font-size: 1.1rem;
+    }
+
+    /* Filtros y búsqueda */
+    .filters-section {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 30px;
+        flex-wrap: wrap;
+    }
+
+    .search-box {
+        position: relative;
+        flex: 1;
+        min-width: 250px;
+    }
+
+    .search-box input {
+        width: 100%;
+        padding: 12px 15px 12px 40px;
+        border: 1px solid var(--gray-light);
+        border-radius: var(--border-radius);
+        font-size: 1rem;
+        transition: var(--transition);
+    }
+
+    .search-box input:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.1);
+    }
+
+    .search-icon {
+        position: absolute;
+        left: 15px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--gray);
+    }
+
+    .filter-group select {
+        padding: 12px 15px;
+        border: 1px solid var(--gray-light);
+        border-radius: var(--border-radius);
+        font-size: 1rem;
+        background-color: var(--white);
+        min-width: 200px;
+        cursor: pointer;
+    }
+
+    /* Modal */
+    .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1000;
+    }
+
+    .modal-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-content {
+        position: relative;
+        background: var(--white);
+        margin: 50px auto;
+        max-width: 500px;
+        border-radius: var(--border-radius);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        animation: modalSlideIn 0.3s ease;
+    }
+
+    @keyframes modalSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 25px;
+        border-bottom: 1px solid var(--gray-light);
+    }
+
+    .modal-header h2 {
+        margin: 0;
+        color: var(--dark);
+    }
+
+    .close-btn {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: var(--gray);
+        transition: var(--transition);
+    }
+
+    .close-btn:hover {
+        color: var(--dark);
+    }
+
+    .modal-form {
+        padding: 25px;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: var(--dark);
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 12px 15px;
+        border: 1px solid var(--gray-light);
+        border-radius: var(--border-radius);
+        font-size: 1rem;
+        transition: var(--transition);
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.1);
+    }
+
+    .form-errors {
+        margin-top: 5px;
+    }
+
+    .error-text {
+        color: var(--danger);
+        font-size: 0.85rem;
+    }
+
+    .form-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 25px;
+    }
+
+    .btn-secondary {
+        background: var(--gray-light);
+        color: var(--dark);
+    }
+
+    .btn-secondary:hover {
+        background: #d1d5db;
+    }
+
+    /* Grid de ejercicios */
+    .exercises-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 20px;
+    }
+
+    .exercise-card {
+        background: var(--white);
+        border-radius: var(--border-radius);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        transition: var(--transition);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .exercise-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .card-header {
+        padding: 20px 20px 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+
+    .card-header h3 {
+        margin: 0;
+        font-size: 1.2rem;
+        color: var(--dark);
+        flex: 1;
+        margin-right: 10px;
+    }
+
+    .muscle-badge {
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+    }
+
+    .muscle-pecho { background: #ffebee; color: #c62828; }
+    .muscle-espalda { background: #e3f2fd; color: #1565c0; }
+    .muscle-piernas { background: #e8f5e8; color: #2e7d32; }
+    .muscle-hombros { background: #fff3e0; color: #ef6c00; }
+    .muscle-brazos { background: #fce4ec; color: #ad1457; }
+    .muscle-abdomen { background: #e0f2f1; color: #00695c; }
+    .muscle-cardio { background: #f3e5f5; color: #7b1fa2; }
+
+    .card-body {
+        padding: 0 20px 15px;
+        flex: 1;
+    }
+
+    .exercise-description {
+        color: var(--gray);
+        font-size: 0.9rem;
+        line-height: 1.5;
+        margin: 0;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .card-footer {
+        padding: 15px 20px;
+        border-top: 1px solid var(--gray-light);
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .btn-sm {
+        padding: 8px 12px;
+        font-size: 0.85rem;
+    }
+
+    .btn-danger {
+        background: var(--danger);
+        color: var(--white);
+    }
+
+    .btn-danger:hover {
+        background: #c82333;
+    }
+
+    /* Estado vacío */
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        background: var(--white);
+        border-radius: var(--border-radius);
+        box-shadow: var(--shadow);
+    }
+
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 20px;
+        opacity: 0.5;
+    }
+
+    .empty-state h3 {
+        margin-bottom: 10px;
+        color: var(--dark);
+    }
+
+    .empty-state p {
+        color: var(--gray);
+        margin-bottom: 30px;
+        max-width: 400px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .page-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 15px;
+        }
+
+        .filters-section {
+            flex-direction: column;
+        }
+
+        .search-box, .filter-group select {
+            min-width: 100%;
+        }
+
+        .exercises-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .modal-content {
+            margin: 20px;
+            width: calc(100% - 40px);
+        }
+
+        .form-actions {
+            flex-direction: column;
+        }
+    }
+</style>
+
+<script>
+    function openModal() {
+        document.getElementById('addForm').style.display = 'block';
+    }
+
+    function closeModal() {
+        document.getElementById('addForm').style.display = 'none';
+    }
+
+    function filterExercises() {
+        const searchText = document.getElementById('exerciseSearch').value.toLowerCase();
+        const muscleFilter = document.getElementById('muscleFilter').value;
+        const exerciseCards = document.querySelectorAll('.exercise-card');
+
+        exerciseCards.forEach(card => {
+            const exerciseName = card.querySelector('h3').textContent.toLowerCase();
+            const exerciseMuscle = card.getAttribute('data-muscle');
+
+            const nameMatch = exerciseName.includes(searchText);
+            const muscleMatch = !muscleFilter || exerciseMuscle === muscleFilter;
+
+            if (nameMatch && muscleMatch) {
+                card.style.display = 'flex';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    }
+
+    function confirmDelete() {
+        return confirm('¿Estás seguro de que quieres eliminar este ejercicio?');
+    }
+
+    // Mostrar modal automáticamente si hay errores en el formulario
+    document.addEventListener('DOMContentLoaded', function() {
+        {% if form.errors %}
+        openModal();
+        {% endif %}
+
+        const modal = document.getElementById('addForm');
+        if (modal) {
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    closeModal();
+                }
+            });
+        }
+    });
+
+    // Cerrar modal con tecla Escape
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeModal();
+        }
+    });
+</script>
+{% endblock %}

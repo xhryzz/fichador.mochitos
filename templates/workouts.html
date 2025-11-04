@@ -1,0 +1,856 @@
+{% extends "base.html" %}
+
+{% block title %}Entrenamientos - Gym Tracker{% endblock %}
+
+{% block content %}
+<div class="workouts-page">
+    {% if not workout %}
+    <!-- Vista de lista de entrenamientos -->
+    <div class="page-header">
+        <div class="header-content">
+            <h1>Mis Entrenamientos</h1>
+            <p>Gestiona y revisa tu historial de entrenamientos</p>
+        </div>
+        <button class="btn btn-primary btn-with-icon" onclick="openModal()">
+            <span class="btn-icon">+</span>
+            Nuevo Entrenamiento
+        </button>
+    </div>
+
+    <div class="filters-section">
+        <div class="search-box">
+            <input type="text" id="workoutSearch" placeholder="Buscar entrenamientos..." onkeyup="filterWorkouts()">
+            <span class="search-icon">🔍</span>
+        </div>
+        <div class="stats-overview">
+            <div class="stat-badge">
+                <span class="stat-number">{{ workouts|length }}</span>
+                <span class="stat-label">Entrenamientos</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="addForm" class="modal" style="display: {% if form and not workout %}block{% else %}none{% endif %};">
+        <div class="modal-overlay" onclick="closeModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Nuevo Entrenamiento</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <form method="POST" action="{{ url_for('add_workout') }}" class="modal-form">
+                {{ form.hidden_tag() if form }}
+                <div class="form-group">
+                    <label for="name">{{ form.name.label if form else "Nombre del entrenamiento" }}</label>
+                    {{ form.name(class="form-control", placeholder="Ej: Entrenamiento de pecho") if form }}
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="duration">{{ form.duration.label if form else "Duración (minutos)" }}</label>
+                        {{ form.duration(class="form-control", placeholder="60") if form }}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="description">{{ form.description.label if form else "Descripción" }}</label>
+                    {{ form.description(class="form-control", rows="4", placeholder="Describe tu entrenamiento...") if form }}
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Crear Entrenamiento</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if workouts %}
+    <div class="workouts-grid" id="workoutsGrid">
+        {% for w in workouts %}
+        <div class="workout-card">
+            <div class="card-header">
+                <h3><a href="{{ url_for('workout_detail', id=w.id) }}" class="workout-title">{{ w.name }}</a></h3>
+                <span class="workout-date">{{ w.date.strftime('%d/%m/%Y') }}</span>
+            </div>
+            <div class="card-body">
+                <div class="workout-meta">
+                    <div class="meta-item">
+                        <span class="meta-icon">⏱️</span>
+                        <span class="meta-text">{{ w.duration or "N/A" }} min</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-icon">💪</span>
+                        <span class="meta-text">{{ w.exercise_entries|length }} ejercicios</span>
+                    </div>
+                </div>
+                {% if w.description %}
+                <p class="workout-description">{{ w.description }}</p>
+                {% endif %}
+            </div>
+            <div class="card-footer">
+                <a href="{{ url_for('workout_detail', id=w.id) }}" class="btn btn-outline">Ver Detalles</a>
+                <a href="{{ url_for('delete_workout', id=w.id) }}" class="btn btn-danger btn-sm" onclick="return confirm('¿Estás seguro de que quieres eliminar este entrenamiento?')">
+                    <span class="btn-icon">🗑️</span>
+                    Eliminar
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">🏋️‍♂️</div>
+        <h3>No tienes entrenamientos registrados</h3>
+        <p>Comienza creando tu primer entrenamiento para llevar un registro de tu progreso.</p>
+        <button class="btn btn-primary btn-with-icon" onclick="openModal()">
+            <span class="btn-icon">+</span>
+            Crear Primer Entrenamiento
+        </button>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <!-- Vista de detalle de entrenamiento -->
+    <div class="workout-detail-header">
+        <a href="{{ url_for('workouts') }}" class="back-btn">
+            <span class="back-icon">←</span>
+            Volver a entrenamientos
+        </a>
+        <div class="header-actions">
+            <button class="btn btn-primary btn-with-icon" onclick="openExerciseModal()">
+                <span class="btn-icon">+</span>
+                Añadir Ejercicio
+            </button>
+        </div>
+    </div>
+
+    <div class="workout-detail-card">
+        <div class="workout-info">
+            <h1>{{ workout.name }}</h1>
+            <p class="workout-description">{{ workout.description or "Sin descripción" }}</p>
+            <div class="workout-meta-grid">
+                <div class="meta-card">
+                    <span class="meta-label">Fecha</span>
+                    <span class="meta-value">{{ workout.date.strftime('%d/%m/%Y %H:%M') }}</span>
+                </div>
+                {% if workout.duration %}
+                <div class="meta-card">
+                    <span class="meta-label">Duración</span>
+                    <span class="meta-value">{{ workout.duration }} minutos</span>
+                </div>
+                {% endif %}
+                <div class="meta-card">
+                    <span class="meta-label">Total Ejercicios</span>
+                    <span class="meta-value">{{ workout.exercise_entries|length }}</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="exerciseModal" class="modal" style="display: none;">
+            <div class="modal-overlay" onclick="closeExerciseModal()"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Añadir Ejercicio</h2>
+                    <button class="close-btn" onclick="closeExerciseModal()">&times;</button>
+                </div>
+                <form method="POST" action="{{ url_for('add_exercise_to_workout', id=workout.id) }}" class="modal-form">
+                    {{ form.hidden_tag() }}
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="exercise_id">{{ form.exercise_id.label }}</label>
+                            {{ form.exercise_id(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="sets">{{ form.sets.label }}</label>
+                            {{ form.sets(class="form-control", placeholder="3") }}
+                        </div>
+                        <div class="form-group">
+                            <label for="reps">{{ form.reps.label }}</label>
+                            {{ form.reps(class="form-control", placeholder="10") }}
+                        </div>
+                        <div class="form-group">
+                            <label for="weight">{{ form.weight.label }}</label>
+                            {{ form.weight(class="form-control", placeholder="20") }}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="notes">{{ form.notes.label if form.notes else "Notas" }}</label>
+                        {{ form.notes(class="form-control", rows="3", placeholder="Notas adicionales...") if form.notes else "" }}
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" onclick="closeExerciseModal()">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Añadir Ejercicio</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="workout-exercises">
+            <div class="section-header">
+                <h2>Ejercicios del Entrenamiento</h2>
+                <span class="exercise-count">{{ workout.exercise_entries|length }} ejercicios</span>
+            </div>
+
+            {% if workout.exercise_entries %}
+            <div class="exercises-table">
+                <div class="table-header">
+                    <div class="col-exercise">Ejercicio</div>
+                    <div class="col-sets">Series</div>
+                    <div class="col-reps">Reps</div>
+                    <div class="col-weight">Peso (kg)</div>
+                    <div class="col-notes">Notas</div>
+                </div>
+                <div class="table-body">
+                    {% for entry in workout.exercise_entries %}
+                    <div class="table-row">
+                        <div class="col-exercise">
+                            <span class="exercise-name">{{ entry.exercise.name }}</span>
+                            <span class="exercise-muscle">{{ entry.exercise.muscle_group }}</span>
+                        </div>
+                        <div class="col-sets">{{ entry.sets }}</div>
+                        <div class="col-reps">{{ entry.reps }}</div>
+                        <div class="col-weight">{{ entry.weight or "-" }}</div>
+                        <div class="col-notes">{{ entry.notes or "-" }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">💪</div>
+                <h3>No hay ejercicios en este entrenamiento</h3>
+                <p>Añade tu primer ejercicio para comenzar a registrar tu entrenamiento.</p>
+                <button class="btn btn-primary btn-with-icon" onclick="openExerciseModal()">
+                    <span class="btn-icon">+</span>
+                    Añadir Primer Ejercicio
+                </button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    /* Estilos específicos para la página de entrenamientos */
+    .workouts-page {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 20px;
+    }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--gray-light);
+    }
+
+    .header-content h1 {
+        font-size: 2.2rem;
+        margin-bottom: 8px;
+        color: var(--dark);
+        font-weight: 700;
+    }
+
+    .header-content p {
+        color: var(--gray);
+        margin: 0;
+    }
+
+    .btn-with-icon {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .btn-icon {
+        font-size: 1.1rem;
+    }
+
+    /* Filtros y búsqueda */
+    .filters-section {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+        flex-wrap: wrap;
+        gap: 15px;
+    }
+
+    .search-box {
+        position: relative;
+        flex: 1;
+        min-width: 300px;
+    }
+
+    .search-box input {
+        width: 100%;
+        padding: 12px 15px 12px 40px;
+        border: 1px solid var(--gray-light);
+        border-radius: var(--border-radius);
+        font-size: 1rem;
+        transition: var(--transition);
+    }
+
+    .search-box input:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.1);
+    }
+
+    .search-icon {
+        position: absolute;
+        left: 15px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--gray);
+    }
+
+    .stats-overview {
+        display: flex;
+        gap: 15px;
+    }
+
+    .stat-badge {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 10px 15px;
+        background: var(--white);
+        border-radius: var(--border-radius);
+        box-shadow: var(--shadow);
+    }
+
+    .stat-number {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--primary);
+    }
+
+    .stat-label {
+        font-size: 0.8rem;
+        color: var(--gray);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    /* Grid de entrenamientos */
+    .workouts-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 20px;
+    }
+
+    .workout-card {
+        background: var(--white);
+        border-radius: var(--border-radius);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        transition: var(--transition);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .workout-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .card-header {
+        padding: 20px 20px 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+
+    .workout-title {
+        font-size: 1.2rem;
+        color: var(--dark);
+        text-decoration: none;
+        font-weight: 600;
+        transition: var(--transition);
+    }
+
+    .workout-title:hover {
+        color: var(--primary);
+    }
+
+    .workout-date {
+        font-size: 0.85rem;
+        color: var(--gray);
+        background: var(--gray-light);
+        padding: 4px 8px;
+        border-radius: 4px;
+    }
+
+    .card-body {
+        padding: 10px 20px 15px;
+        flex: 1;
+    }
+
+    .workout-meta {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 10px;
+    }
+
+    .meta-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 0.9rem;
+        color: var(--gray);
+    }
+
+    .meta-icon {
+        font-size: 0.8rem;
+    }
+
+    .workout-description {
+        color: var(--gray);
+        font-size: 0.9rem;
+        line-height: 1.5;
+        margin: 0;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .card-footer {
+        padding: 15px 20px;
+        border-top: 1px solid var(--gray-light);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .btn-outline {
+        background: transparent;
+        color: var(--primary);
+        border: 1px solid var(--primary);
+        text-decoration: none;
+        padding: 8px 16px;
+        border-radius: var(--border-radius);
+        transition: var(--transition);
+    }
+
+    .btn-outline:hover {
+        background: var(--primary);
+        color: var(--white);
+    }
+
+    /* Detalle del entrenamiento */
+    .workout-detail-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--gray-light);
+    }
+
+    .back-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--primary);
+        text-decoration: none;
+        font-weight: 500;
+        transition: var(--transition);
+    }
+
+    .back-btn:hover {
+        color: var(--primary-dark);
+    }
+
+    .workout-detail-card {
+        background: var(--white);
+        border-radius: var(--border-radius);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+    }
+
+    .workout-info {
+        padding: 30px;
+        border-bottom: 1px solid var(--gray-light);
+    }
+
+    .workout-info h1 {
+        font-size: 2rem;
+        margin-bottom: 10px;
+        color: var(--dark);
+    }
+
+    .workout-meta-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 15px;
+        margin-top: 20px;
+    }
+
+    .meta-card {
+        background: var(--gray-light);
+        padding: 15px;
+        border-radius: var(--border-radius);
+        text-align: center;
+    }
+
+    .meta-label {
+        display: block;
+        font-size: 0.8rem;
+        color: var(--gray);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 5px;
+    }
+
+    .meta-value {
+        display: block;
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: var(--dark);
+    }
+
+    .workout-exercises {
+        padding: 30px;
+    }
+
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .section-header h2 {
+        font-size: 1.5rem;
+        color: var(--dark);
+        margin: 0;
+    }
+
+    .exercise-count {
+        background: var(--primary);
+        color: var(--white);
+        padding: 5px 10px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+
+    /* Tabla de ejercicios */
+    .exercises-table {
+        border: 1px solid var(--gray-light);
+        border-radius: var(--border-radius);
+        overflow: hidden;
+    }
+
+    .table-header {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr 1fr 2fr;
+        background: var(--gray-light);
+        padding: 15px 20px;
+        font-weight: 600;
+        color: var(--dark);
+        font-size: 0.9rem;
+    }
+
+    .table-body {
+        background: var(--white);
+    }
+
+    .table-row {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr 1fr 2fr;
+        padding: 15px 20px;
+        border-bottom: 1px solid var(--gray-light);
+        align-items: center;
+    }
+
+    .table-row:last-child {
+        border-bottom: none;
+    }
+
+    .col-exercise {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .exercise-name {
+        font-weight: 600;
+        color: var(--dark);
+    }
+
+    .exercise-muscle {
+        font-size: 0.8rem;
+        color: var(--gray);
+        margin-top: 2px;
+    }
+
+    /* Modal (reutilizado de ejercicios) */
+    .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1000;
+    }
+
+    .modal-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-content {
+        position: relative;
+        background: var(--white);
+        margin: 50px auto;
+        max-width: 500px;
+        border-radius: var(--border-radius);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        animation: modalSlideIn 0.3s ease;
+    }
+
+    @keyframes modalSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 25px;
+        border-bottom: 1px solid var(--gray-light);
+    }
+
+    .modal-header h2 {
+        margin: 0;
+        color: var(--dark);
+    }
+
+    .close-btn {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: var(--gray);
+        transition: var(--transition);
+    }
+
+    .close-btn:hover {
+        color: var(--dark);
+    }
+
+    .modal-form {
+        padding: 25px;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 15px;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: var(--dark);
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 12px 15px;
+        border: 1px solid var(--gray-light);
+        border-radius: var(--border-radius);
+        font-size: 1rem;
+        transition: var(--transition);
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.1);
+    }
+
+    .form-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 25px;
+    }
+
+    .btn-secondary {
+        background: var(--gray-light);
+        color: var(--dark);
+    }
+
+    .btn-secondary:hover {
+        background: #d1d5db;
+    }
+
+    /* Estado vacío */
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        background: var(--white);
+        border-radius: var(--border-radius);
+        box-shadow: var(--shadow);
+    }
+
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 20px;
+        opacity: 0.5;
+    }
+
+    .empty-state h3 {
+        margin-bottom: 10px;
+        color: var(--dark);
+    }
+
+    .empty-state p {
+        color: var(--gray);
+        margin-bottom: 30px;
+        max-width: 400px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .page-header, .workout-detail-header, .filters-section {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 15px;
+        }
+
+        .search-box {
+            min-width: 100%;
+        }
+
+        .workouts-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .workout-meta-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .table-header, .table-row {
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+
+        .col-exercise, .col-sets, .col-reps, .col-weight, .col-notes {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+        }
+
+        .col-exercise::before { content: "Ejercicio: "; font-weight: 600; }
+        .col-sets::before { content: "Series: "; font-weight: 600; }
+        .col-reps::before { content: "Reps: "; font-weight: 600; }
+        .col-weight::before { content: "Peso: "; font-weight: 600; }
+        .col-notes::before { content: "Notas: "; font-weight: 600; }
+
+        .modal-content {
+            margin: 20px;
+            width: calc(100% - 40px);
+        }
+
+        .form-actions {
+            flex-direction: column;
+        }
+
+        .card-footer {
+            flex-direction: column;
+            gap: 10px;
+            align-items: stretch;
+        }
+
+        .btn-outline, .btn-danger {
+            text-align: center;
+        }
+    }
+</style>
+
+<script>
+    function openModal() {
+        document.getElementById('addForm').style.display = 'block';
+    }
+
+    function closeModal() {
+        document.getElementById('addForm').style.display = 'none';
+    }
+
+    function openExerciseModal() {
+        document.getElementById('exerciseModal').style.display = 'block';
+    }
+
+    function closeExerciseModal() {
+        document.getElementById('exerciseModal').style.display = 'none';
+    }
+
+    function filterWorkouts() {
+        const searchText = document.getElementById('workoutSearch').value.toLowerCase();
+        const workoutCards = document.querySelectorAll('.workout-card');
+
+        workoutCards.forEach(card => {
+            const workoutName = card.querySelector('.workout-title').textContent.toLowerCase();
+            const workoutDate = card.querySelector('.workout-date').textContent.toLowerCase();
+            const workoutDesc = card.querySelector('.workout-description')?.textContent.toLowerCase() || '';
+
+            const nameMatch = workoutName.includes(searchText);
+            const dateMatch = workoutDate.includes(searchText);
+            const descMatch = workoutDesc.includes(searchText);
+
+            if (nameMatch || dateMatch || descMatch) {
+                card.style.display = 'flex';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    }
+
+    // Cerrar modales al hacer clic fuera del contenido
+    document.addEventListener('DOMContentLoaded', function() {
+        const modals = document.querySelectorAll('.modal');
+        modals.forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    if (modal.id === 'addForm') closeModal();
+                    if (modal.id === 'exerciseModal') closeExerciseModal();
+                }
+            });
+        });
+    });
+
+    // Cerrar modales con tecla Escape
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeModal();
+            closeExerciseModal();
+        }
+    });
+</script>
+{% endblock %}
