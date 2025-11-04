@@ -1,0 +1,168 @@
+
+<!DOCTYPE html>
+<html lang="es" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fichador - {% block title %}{% endblock %}</title>
+
+    <!-- Preconnect para mejorar rendimiento -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://unpkg.com">
+
+    <!-- CSS con defer para no bloquear -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="/static/css/style.min.css">
+
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#4CAF50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Fichador">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192x192.png">
+    <link rel="apple-touch-icon" href="/static/icon-192x192.png">
+</head>
+<body>
+<!-- Navbar -->
+<nav class="navbar navbar-expand-lg navbar-light sticky-top">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+            <i class="fas fa-clock"></i>
+            <span>Fichador Mochitos</span>
+        </a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <i class="fas fa-bars"></i>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+            {% if current_user.is_authenticated %}
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'dashboard' }}" href="{{ url_for('dashboard') }}">
+                        <i class="fas fa-home"></i>
+                        <span>Inicio</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'schedule' }}" href="{{ url_for('schedule') }}">
+                        <i class="fas fa-calendar"></i>
+                        <span>Horario</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'records' }}" href="{{ url_for('records') }}">
+                        <i class="fas fa-list"></i>
+                        <span>Registros</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'stats' }}" href="{{ url_for('stats') }}">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Estadísticas</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'reports' }}" href="{{ url_for('reports') }}">
+                        <i class="fas fa-file-alt"></i>
+                        <span>Informes</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'notifications' }}" href="{{ url_for('notifications') }}">
+                        <i class="fas fa-bell"></i>
+                        <span>Notificaciones</span>
+                    </a>
+                </li>
+                {% if current_user.is_admin %}
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'admin' }} text-warning" href="{{ url_for('admin') }}">
+                        <i class="fas fa-cog"></i>
+                        <span>Admin</span>
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item">
+                    <button class="theme-toggle nav-link" onclick="toggleTheme()">
+                        <i class="fas fa-moon" id="theme-icon"></i>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('logout') }}">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Salir</span>
+                    </a>
+                </li>
+            </ul>
+            {% endif %}
+        </div>
+    </div>
+</nav>
+
+<!-- Main Content -->
+<div class="container fade-in-up">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for category, message in messages %}
+    <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show mb-4">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+</div>
+
+<!-- Scripts al final para no bloquear rendering -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" defer></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+<script src="/static/js/notifications.js" defer></script>
+
+<script>
+    function toggleTheme() {
+        const currentTheme = document.documentElement.getAttribute('data-bs-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-bs-theme', newTheme);
+        document.getElementById('theme-icon').className = newTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+        localStorage.setItem('theme', newTheme);
+    }
+
+    function loadTheme() {
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-bs-theme', savedTheme);
+        const icon = document.getElementById('theme-icon');
+        if (icon) icon.className = savedTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        loadTheme();
+
+        // Iniciar monitoreo de horarios
+        fetch('/api/schedules')
+            .then(res => res.json())
+            .then(schedules => {
+                fetch('/api/active_record')
+                    .then(res => res.json())
+                    .then(activeData => {
+                        if (window.notificationManager) {
+                            notificationManager.startScheduleMonitoring(schedules, activeData.has_active_record);
+                        }
+                    });
+            });
+    });
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

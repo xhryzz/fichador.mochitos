@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+
+{% block title %}Panel de {{ user.name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1>👨‍💼 Panel de {{ user.name }}</h1>
+            <p class="text-muted">{{ user.email }} | Horas requeridas: {{ "%.1f"|format(user.total_hours_required) }}h</p>
+        </div>
+        <div>
+            <a href="{{ url_for('admin') }}" class="btn btn-secondary">← Volver al panel admin</a>
+        </div>
+    </div>
+
+    <!-- Estado actual -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5>📊 Estado Actual</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="text-center p-3 border rounded">
+                                <h6>Hoy</h6>
+                                <h4 class="text-primary">{{ today_hours|hm }}</h4>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center p-3 border rounded">
+                                <h6>Esta semana</h6>
+                                <h4 class="text-info">{{ weekly_hours|hm }}</h4>
+                                <small class="text-muted">Req: {{ weekly_required_hours|hm }}</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center p-3 border rounded">
+                                <h6>Total</h6>
+                                <h4 class="text-success">{{ total_hours_worked|hm }}</h4>
+                                <small class="text-muted">Req: {{ user.total_hours_required|hm }}</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center p-3 border rounded">
+                                <h6>Estado</h6>
+                                {% if active_record %}
+                                    <span class="badge bg-success">✅ Fichando</span>
+                                    <small class="d-block mt-1">Desde: {{ active_record.entry_time|localdt('%H:%M') }}</small>
+                                {% else %}
+                                    <span class="badge bg-secondary">🔴 No fichando</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Fichajes de hoy -->
+        <div class="col-lg-6 mb-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5>📅 Fichajes de Hoy</h5>
+                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addRecordModal">
+                        ➕ Añadir Fichaje
+                    </button>
+                </div>
+                <div class="card-body">
+                    {% if today_records %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Entrada</th>
+                                    <th>Salida</th>
+                                    <th>Duración</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for record in today_records %}
+                                <tr {% if not record.exit_time %}class="table-warning"{% endif %}>
+                                    <td>{{ record.entry_time|localdt('%H:%M') }}</td>
+                                    <td>
+                                        {% if record.exit_time %}
+                                            {{ record.exit_time|localdt('%H:%M') }}
+                                        {% else %}
+                                            <span class="badge bg-warning">En curso</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if record.exit_time %}
+                                            {{ ((record.exit_time - record.entry_time).total_seconds())|hm_seconds }}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-secondary" 
+                                                    onclick="editRecord({{ record.id }})"
+                                                    title="Editar">
+                                                ✏️
+                                            </button>
+                                            {% if not record.exit_time %}
+                                                <form method="POST" action="{{ url_for('admin_clock_out_user', user_id=user.id) }}" class="d-inline">
+                                                    <button type="submit" class="btn btn-outline-danger" title="Forzar salida">
+                                                        🛑
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted text-center">No hay fichajes hoy</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Horarios -->
+        <div class="col-lg-6 mb-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5>🕒 Horarios</h5>
+                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addScheduleModal">
+                        ➕ Añadir Horario
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Día</th>
+                                    <th>Horario</th>
+                                    <th>Horas</th>
+                                    <th>Estado</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for day_num, day_name in days_of_week %}
+                                {% set schedule = schedules_by_day.get(day_num) %}
+                                <tr>
+                                    <td>{{ day_name }}</td>
+                                    <td>
+                                        {% if schedule %}
+                                            {{ schedule.start_time.strftime('%H:%M') }} - {{ schedule.end_time.strftime('%H:%M') }}
+                                            {% if schedule.start_time_2 %}
+                                                <br><small>y {{ schedule.start_time_2.strftime('%H:%M') }} - {{ schedule.end_time_2.strftime('%H:%M') }}</small>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if schedule %}
+                                            {{ "%.1f"|format(schedule.hours_required) }}h
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if schedule %}
+                                            {% if schedule.is_active %}
+                                                <span class="badge bg-success">Activo</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">Inactivo</span>
+                                            {% endif %}
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if schedule %}
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-secondary" 
+                                                    onclick="editSchedule({{ schedule.id }})"
+                                                    title="Editar">
+                                                ✏️
+                                            </button>
+                                            <a href="{{ url_for('admin_schedule_toggle', user_id=user.id, id=schedule.id) }}" 
+                                               class="btn btn-outline-{{ 'warning' if schedule.is_active else 'success' }}"
+                                               title="{{ 'Desactivar' if schedule.is_active else 'Activar' }}">
+                                                {{ '🔴' if schedule.is_active else '🟢' }}
+                                            </a>
+                                            <a href="{{ url_for('admin_schedule_delete', user_id=user.id, id=schedule.id) }}" 
+                                               class="btn btn-outline-danger"
+                                               onclick="return confirm('¿Eliminar este horario?')"
+                                               title="Eliminar">
+                                                🗑️
+                                            </a>
+                                        </div>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Últimos fichajes -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5>📋 Últimos Fichajes</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Entrada</th>
+                                    <th>Salida</th>
+                                    <th>Duración</th>
+                                    <th>Ubicación</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for record in recent_records %}
+                                <tr>
+                                    <td>{{ record.date.strftime('%d/%m/%Y') }}</td>
+                                    <td>{{ record.entry_time|localdt('%H:%M') }}</td>
+                                    <td>
+                                        {% if record.exit_time %}
+                                            {{ record.exit_time|localdt('%H:%M') }}
+                                        {% else %}
+                                            <span class="badge bg-warning">En curso</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if record.exit_time %}
+                                            {{ ((record.exit_time - record.entry_time).total_seconds())|hm_seconds }}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ record.location or '—' }}</td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-secondary" 
+                                                    onclick="editRecord({{ record.id }})"
+                                                    title="Editar">
+                                                ✏️
+                                            </button>
+                                            <a href="{{ url_for('admin_delete_record', record_id=record.id) }}" 
+                                               class="btn btn-outline-danger"
+                                               onclick="return confirm('¿Eliminar este fichaje?')"
+                                               title="Eliminar">
+                                                🗑️
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="text-center">
+                        <a href="{{ url_for('admin_user_records', user_id=user.id) }}" class="btn btn-outline-primary">
+                            Ver todos los fichajes
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Añadir Fichaje -->
+<div class="modal fade" id="addRecordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">➕ Añadir Fichaje</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('admin_add_record_for_user', user_id=user.id) }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Fecha</label>
+                        <input type="date" class="form-control" name="date" value="{{ now().strftime('%Y-%m-%d') }}" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label">Hora entrada</label>
+                            <input type="time" class="form-control" name="entry_time" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Hora salida</label>
+                            <input type="time" class="form-control" name="exit_time">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ubicación</label>
+                        <input type="text" class="form-control" name="location" placeholder="Ubicación">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notas</label>
+                        <textarea class="form-control" name="notes" rows="2" placeholder="Notas opcionales"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Añadir Horario -->
+<div class="modal fade" id="addScheduleModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">➕ Añadir Horario</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('admin_add_schedule_for_user', user_id=user.id) }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Día de la semana</label>
+                        <select class="form-select" name="day_of_week" required>
+                            {% for day_num, day_name in days_of_week %}
+                            <option value="{{ day_num }}">{{ day_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label">Hora inicio</label>
+                            <input type="time" class="form-control" name="start_time" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Hora fin</label>
+                            <input type="time" class="form-control" name="end_time" required>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-6">
+                            <label class="form-label">Hora inicio 2 (opcional)</label>
+                            <input type="time" class="form-control" name="start_time_2">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Hora fin 2 (opcional)</label>
+                            <input type="time" class="form-control" name="end_time_2">
+                        </div>
+                    </div>
+                    <div class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" name="is_active" id="is_active" checked>
+                        <label class="form-check-label" for="is_active">
+                            Horario activo
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function editRecord(recordId) {
+    window.location.href = "{{ url_for('admin_edit_record', record_id=0) }}".replace('0', recordId);
+}
+
+function editSchedule(scheduleId) {
+    // Aquí puedes implementar la edición de horarios
+    alert('Editar horario ' + scheduleId + ' - Funcionalidad por implementar');
+}
+</script>
+{% endblock %}

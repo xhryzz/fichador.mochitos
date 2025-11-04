@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block title %}Nuevo fichaje{% endblock %}
+{% block content %}
+<div class="container" style="max-width:720px;margin:auto">
+  <h2>Nuevo fichaje</h2>
+  <form method="POST" action="{{ url_for('user_add_record') }}" class="card" style="padding:16px">
+    <div class="row">
+      <div class="col">
+        <label>Fecha</label>
+        <input type="date" name="date" class="form-control" value="{{ now.date().isoformat() if now else '' }}" required>
+      </div>
+      <div class="col">
+        <label>Entrada</label>
+        <input type="time" name="entry_time" class="form-control" required>
+      </div>
+      <div class="col">
+        <label>Salida (opcional)</label>
+        <input type="time" name="exit_time" class="form-control">
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div class="col">
+        <label>Ubicación</label>
+        <input type="text" name="location" class="form-control" placeholder="Córdoba Ecuestre">
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div class="col">
+        <label>Latitud</label>
+        <input type="number" step="0.000001" name="latitude" class="form-control">
+      </div>
+      <div class="col">
+        <label>Longitud</label>
+        <input type="number" step="0.000001" name="longitude" class="form-control">
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div class="col">
+        <label>Notas</label>
+        <textarea name="notes" class="form-control" rows="3"></textarea>
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      <a href="{{ url_for('records') }}" class="btn btn-secondary">Cancelar</a>
+      <button type="submit" class="btn btn-primary">Guardar</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

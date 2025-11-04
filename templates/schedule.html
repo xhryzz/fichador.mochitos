@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}Horarios{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4><i class="fas fa-calendar-week"></i> Configuración de Horarios</h4>
+                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#copyWeekModal">
+                    <i class="fas fa-copy"></i> Copiar a otros días
+                </button>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Configura tu horario para cada día de la semana. Puedes activar/desactivar días individuales.</p>
+
+                <div class="row g-3">
+                    {% for day_num, day_name in days_of_week %}
+                    <div class="col-md-6 col-lg-4">
+                        <div class="card h-100 {% if schedules_by_day.get(day_num) and schedules_by_day[day_num].is_active %}border-primary{% else %}border-secondary{% endif %}">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-calendar-day"></i> {{ day_name }}
+                                </h6>
+                                {% if schedules_by_day.get(day_num) %}
+                                <div class="form-check form-switch mb-0">
+                                    <input class="form-check-input" type="checkbox"
+                                           {% if schedules_by_day[day_num].is_active %}checked{% endif %}
+                                           onchange="window.location.href='{{ url_for('toggle_schedule', id=schedules_by_day[day_num].id) }}'">
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="card-body">
+                                {% set schedule = schedules_by_day.get(day_num) %}
+
+                                <form method="POST" action="{{ url_for('add_schedule') }}">
+                                    <input type="hidden" name="day_of_week" value="{{ day_num }}">
+
+                                    <div class="mb-2">
+                                        <label class="form-label small">Entrada</label>
+                                        <input type="time" class="form-control form-control-sm"
+                                               name="start_time"
+                                               value="{{ schedule.start_time.strftime('%H:%M') if schedule else '09:00' }}"
+                                               required>
+                                    </div>
+
+                                    <div class="mb-2">
+                                        <label class="form-label small">Salida</label>
+                                        <input type="time" class="form-control form-control-sm"
+                                               name="end_time"
+                                               value="{{ schedule.end_time.strftime('%H:%M') if schedule else '17:00' }}"
+                                               required>
+                                    </div>
+
+                                    <div class="mb-2">
+                                        <label class="form-label small">Entrada (turno 2, opcional)</label>
+                                        <input type="time" class="form-control form-control-sm"
+                                               name="start_time_2"
+                                               value="{{ schedule.start_time_2.strftime('%H:%M') if schedule and schedule.start_time_2 else '' }}">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label small">Salida (turno 2, opcional)</label>
+                                        <input type="time" class="form-control form-control-sm"
+                                               name="end_time_2"
+                                               value="{{ schedule.end_time_2.strftime('%H:%M') if schedule and schedule.end_time_2 else '' }}">
+                                    </div>
+
+
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox"
+                                               name="is_active" id="active_{{ day_num }}"
+                                               {% if not schedule or schedule.is_active %}checked{% endif %}>
+                                        <label class="form-check-label small" for="active_{{ day_num }}">
+                                            Día laborable
+                                        </label>
+                                    </div>
+
+                                    {% if schedule %}
+                                    <div class="alert alert-info py-1 px-2 mb-2 small">
+                                        <i class="fas fa-clock"></i> {{ "%.1f"|format(schedule.hours_required) }}h
+                                    </div>
+                                    {% endif %}
+
+                                    <div class="d-flex gap-1">
+                                        <button type="submit" class="btn btn-primary btn-sm flex-grow-1">
+                                            <i class="fas fa-save"></i> {{ 'Actualizar' if schedule else 'Guardar' }}
+                                        </button>
+                                        {% if schedule %}
+                                        <a href="{{ url_for('delete_schedule', id=schedule.id) }}"
+                                           class="btn btn-danger btn-sm"
+                                           onclick="return confirm('¿Eliminar horario de {{ day_name }}?')">
+                                            <i class="fas fa-trash"></i>
+                                        </a>
+                                        {% endif %}
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-graduation-cap"></i> Horas Totales de Prácticas</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('update_total_hours') }}">
+                    <div class="mb-3">
+                        <label class="form-label">Total de horas requeridas</label>
+                        <input type="number" class="form-control" name="total_hours"
+                               value="{{ current_user.total_hours_required }}"
+                               step="0.5" min="0" required>
+                        <small class="text-muted">Horas totales que debes completar en tus prácticas</small>
+                    </div>
+                    <button type="submit" class="btn btn-success">
+                        <i class="fas fa-save"></i> Actualizar
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-info-circle"></i> Resumen Semanal</h5>
+            </div>
+            <div class="card-body">
+                {% set total_weekly = namespace(hours=0) %}
+                {% set active_days = namespace(count=0) %}
+
+                {% for day_num, day_name in days_of_week %}
+                {% set schedule = schedules_by_day.get(day_num) %}
+                {% if schedule and schedule.is_active %}
+                {% set total_weekly.hours = total_weekly.hours + schedule.hours_required %}
+                {% set active_days.count = active_days.count + 1 %}
+                {% endif %}
+                {% endfor %}
+
+                <div class="alert alert-primary">
+                    <h4 class="mb-0">{{ "%.1f"|format(total_weekly.hours) }}h / semana</h4>
+                    <small>{{ active_days.count }} días laborables configurados</small>
+                </div>
+
+                <h6 class="mt-3">Días configurados:</h6>
+                <ul class="list-group">
+                    {% for day_num, day_name in days_of_week %}
+                    {% set schedule = schedules_by_day.get(day_num) %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>
+                                <i class="fas fa-calendar-day"></i> {{ day_name }}
+                                {% if not schedule or not schedule.is_active %}
+                                    <span class="badge bg-secondary">Inactivo</span>
+                                {% endif %}
+                            </span>
+                        {% if schedule and schedule.is_active %}
+                        <span class="badge bg-primary">
+{{ schedule.start_time.strftime('%H:%M') }} - {{ schedule.end_time.strftime('%H:%M') }}
+{% if schedule.start_time_2 and schedule.end_time_2 %}
+  &nbsp;•&nbsp; {{ schedule.start_time_2.strftime('%H:%M') }} - {{ schedule.end_time_2.strftime('%H:%M') }}
+{% endif %}
+                                    ({{ "%.1f"|format(schedule.hours_required) }}h)
+                                </span>
+                        {% else %}
+                        <span class="text-muted">No configurado</span>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para copiar horarios -->
+<div class="modal fade" id="copyWeekModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Copiar Horario a Otros Días</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('copy_week') }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Copiar desde:</label>
+                        <select class="form-select" name="source_day" required>
+                            {% for day_num, day_name in days_of_week %}
+                            {% if schedules_by_day.get(day_num) %}
+                            <option value="{{ day_num }}">{{ day_name }}</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Copiar a:</label>
+                        {% for day_num, day_name in days_of_week %}
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox"
+                                   name="target_days[]" value="{{ day_num }}"
+                                   id="target_{{ day_num }}">
+                            <label class="form-check-label" for="target_{{ day_num }}">
+                                {{ day_name }}
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-copy"></i> Copiar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
