@@ -14,11 +14,16 @@
 
                 {% if estimated_end_date %}
                 <p class="mt-2">
-                    Según tu horario, <strong>terminarás las prácticas el {{ estimated_end_date.strftime('%d/%m/%Y')
-                        }}</strong>.
+                    Según tu horario{% if extra_days %} (incluyendo días extra planificados){% endif %},
+                    <strong>terminarás las prácticas el {{ estimated_end_date.strftime('%d/%m/%Y') }}</strong>.
+                </p>
+                {% else %}
+                {% if total_hours_required > 0 %}
+                <p class="mt-2 text-muted">
+                    Configura tu horario para calcular la fecha estimada de fin de prácticas.
                 </p>
                 {% endif %}
-
+                {% endif %}
 
                 {% if active_record %}
                 <div class="alert alert-warning mt-3">
@@ -125,6 +130,7 @@
     </div>
 
     <div class="col-md-4">
+        <!-- Horas semana -->
         <div class="stat-card">
             <h6>Horas esta semana</h6>
             <h3>{{ (weekly_hours * 3600) | hm_seconds }} / {{ "%.0f"|format(weekly_required_hours) }}h</h3>
@@ -143,10 +149,10 @@
             <i class="fas fa-chart-line fa-2x text-primary mt-2"></i>
         </div>
 
+        <!-- Horas totales prácticas -->
         <div class="stat-card mt-3">
             <h6>Horas totales (Prácticas)</h6>
-            <h3>{{ (total_hours_worked * 3600) | hm_seconds }} / {{ "%.0f"|format(total_hours_required) }}h
-            </h3>
+            <h3>{{ (total_hours_worked * 3600) | hm_seconds }} / {{ "%.0f"|format(total_hours_required) }}h</h3>
             <div class="progress mt-2" style="height: 20px;">
                 <div class="progress-bar {% if total_hours_worked >= total_hours_required %}bg-success{% elif total_hours_worked >= total_hours_required * 0.8 %}bg-info{% else %}bg-primary{% endif %}"
                     role="progressbar"
@@ -157,6 +163,7 @@
                     }}%
                 </div>
             </div>
+
             {% if hours_remaining <= 0 %} <small class="text-success mt-1 d-block">
                 ¡Has completado todas las horas de prácticas! 🎉
                 </small>
@@ -166,7 +173,10 @@
                 </small>
                 {% if estimated_end_date %}
                 <small class="text-muted d-block">
-                    Según tu horario, terminarías el <strong>{{ estimated_end_date.strftime('%d/%m/%Y') }}</strong>.
+                    Fin estimado: <strong>{{ estimated_end_date.strftime('%d/%m/%Y') }}</strong>
+                    {% if extra_days %}
+                    (con días extra)
+                    {% endif %}
                 </small>
                 {% else %}
                 <small class="text-muted d-block">
@@ -178,6 +188,49 @@
                 <i class="fas fa-graduation-cap fa-2x text-info mt-2"></i>
         </div>
 
+        <!-- Días extra planificados -->
+        <div class="stat-card mt-3">
+            <h6>Días extra planificados</h6>
+
+            <form action="{{ url_for('add_extra_day') }}" method="POST" class="row g-2">
+                <div class="col-7">
+                    <label class="form-label small mb-0">Fecha</label>
+                    <input type="date" name="extra_date" class="form-control form-control-sm"
+                        min="{{ now.strftime('%Y-%m-%d') }}" required>
+                </div>
+                <div class="col-5">
+                    <label class="form-label small mb-0">Horas</label>
+                    <input type="number" name="extra_hours" class="form-control form-control-sm" step="0.5" min="0.5"
+                        max="12" value="4" required>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-sm btn-outline-primary w-100 mt-1">
+                        <i class="fas fa-plus"></i> Añadir día extra
+                    </button>
+                </div>
+            </form>
+
+            {% if extra_days %}
+            <hr>
+            <ul class="list-unstyled mb-0 small">
+                {% for d in extra_days %}
+                <li class="d-flex justify-content-between align-items-center mb-1">
+                    <span>{{ d.date.strftime('%d/%m/%Y') }} · {{ "%.1f"|format(d.hours_planned) }}h</span>
+                    <a href="{{ url_for('delete_extra_day', id=d.id) }}" class="text-danger small" title="Quitar">
+                        <i class="fas fa-times"></i>
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="small text-muted mb-0 mt-2">
+                No tienes días extra marcados. Usa el formulario para añadir alguno
+                (por ejemplo, un lunes suelto).
+            </p>
+            {% endif %}
+        </div>
+
+        <!-- Estado actual -->
         <div class="stat-card mt-3">
             <h6>Estado actual</h6>
             {% if active_record %}
@@ -189,6 +242,7 @@
             {% endif %}
         </div>
 
+        <!-- Acciones rápidas -->
         <div class="stat-card mt-3">
             <h6>Acciones rápidas</h6>
             <div class="d-grid gap-2">

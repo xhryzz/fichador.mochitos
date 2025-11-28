@@ -198,6 +198,8 @@ class User(UserMixin, db.Model):
     # Agregar el nuevo campo 'status'
     status = db.Column(db.String(50), default="Desconectado")  # En línea, Fichando, Desconectado
 
+    # 🔹 NUEVO: días extra planificados
+    extra_days = db.relationship('ExtraWorkDay', backref='user', lazy=True)
 
 
 
@@ -223,6 +225,15 @@ class TimeRecord(db.Model):
     longitude = db.Column(db.Float, nullable=True)
     notes = db.Column(db.String(500), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+
+
+# 🔹 NUEVO: días extra puntuales que NO cambian el horario fijo
+class ExtraWorkDay(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    date = db.Column(db.Date, nullable=False)  # Día concreto (por ejemplo, un lunes suelto)
+    hours_planned = db.Column(db.Float, nullable=False, default=0.0)  # Horas que piensas hacer ese día
+
 
 class NotificationSettings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -604,6 +615,7 @@ def register():
 def dashboard():
     today = now_local().date()
 
+    # Registros de hoy
     today_records = (TimeRecord.query
                      .filter_by(user_id=current_user.id, date=today)
                      .order_by(TimeRecord.entry_time.desc())
@@ -611,6 +623,7 @@ def dashboard():
 
     active_record = next((record for record in today_records if not record.exit_time), None)
 
+    # Semana actual (desde lunes)
     week_start = today - timedelta(days=today.weekday())
     week_records = (TimeRecord.query
                     .filter(TimeRecord.user_id == current_user.id,
@@ -622,13 +635,14 @@ def dashboard():
     today_hours = sum((r.exit_time - r.entry_time).total_seconds() / 3600
                       for r in today_records if r.exit_time)
 
+    # Total de horas trabajadas (todas las prácticas ya fichadas)
     all_records = (TimeRecord.query
                    .filter(TimeRecord.user_id == current_user.id,
                            TimeRecord.exit_time.isnot(None))
                    .all())
     total_hours_worked = sum((r.exit_time - r.entry_time).total_seconds() / 3600 for r in all_records)
 
-    # Horarios activos del usuario
+    # Horarios semanales activos
     schedules = Schedule.query.filter_by(user_id=current_user.id, is_active=True).all()
     weekly_required_hours = 0
     for i in range(7):
@@ -638,26 +652,53 @@ def dashboard():
         if day_schedule:
             weekly_required_hours += day_schedule.hours_required
 
-    total_hours_required = current_user.total_hours_required
+    total_hours_required = current_user.total_hours_required or 0.0
 
-    # ---- NUEVO: cálculo de horas restantes y fecha estimada de fin de prácticas ----
-    hours_remaining = max(total_hours_required - total_hours_worked, 0)
+    # ==== DÍAS EXTRA PLANIFICADOS (no cambian el horario) ====
+    extra_days = ExtraWorkDay.query.filter(
+        ExtraWorkDay.user_id == current_user.id,
+        ExtraWorkDay.date >= today
+    ).order_by(ExtraWorkDay.date.asc()).all()
+
+    # ==== CÁLCULO DE HORAS RESTANTES Y FECHA ESTIMADA DE FIN ====
+    hours_remaining = max(total_hours_required - total_hours_worked, 0.0)
     estimated_end_date = None
 
-    # Solo calculamos si quedan horas y el horario tiene horas a la semana
-    if hours_remaining > 0 and weekly_required_hours > 0 and schedules:
+    if hours_remaining > 0 and (schedules or extra_days):
         remaining = hours_remaining
-        day_cursor = today
 
-        # Recorremos día a día hasta consumir todas las horas (límite seguridad: 3 años)
+        # Índices rápidos
+        schedules_by_day = {s.day_of_week: s for s in schedules if s.is_active}
+        extras_by_date = {}
+        for e in extra_days:
+            extras_by_date.setdefault(e.date, 0.0)
+            extras_by_date[e.date] += (e.hours_planned or 0.0)
+
+        day_cursor = today
+        # Seguridad: recorremos como máximo 3 años hacia delante
         for _ in range(365 * 3):
             dow = day_cursor.weekday()
-            day_schedule = next((s for s in schedules if s.day_of_week == dow), None)
-            if day_schedule and (day_schedule.hours_required or 0) > 0:
-                remaining -= day_schedule.hours_required
+            hours_for_day = 0.0
+
+            # Horas del horario fijo
+            sch = schedules_by_day.get(dow)
+            if sch and sch.hours_required:
+                hours_for_day += sch.hours_required
+
+            # Horas extra planificadas para ese día concreto (por ejemplo, un lunes suelto)
+            extra_hours = extras_by_date.get(day_cursor, 0.0)
+            hours_for_day += extra_hours
+
+            # Evitar contar dos veces lo ya fichado hoy
+            if day_cursor == today and today_hours > 0:
+                hours_for_day = max(hours_for_day - today_hours, 0.0)
+
+            if hours_for_day > 0:
+                remaining -= hours_for_day
                 if remaining <= 0:
                     estimated_end_date = day_cursor
                     break
+
             day_cursor += timedelta(days=1)
 
     return render_template(
@@ -670,9 +711,72 @@ def dashboard():
         total_hours_worked=total_hours_worked,
         total_hours_required=total_hours_required,
         hours_remaining=hours_remaining,
-        estimated_end_date=estimated_end_date
+        estimated_end_date=estimated_end_date,
+        extra_days=extra_days
     )
 
+
+@app.route('/extra_day/add', methods=['POST'])
+@login_required
+def add_extra_day():
+    try:
+        date_str = request.form.get('extra_date')
+        hours_str = request.form.get('extra_hours')
+
+        if not date_str or not hours_str:
+            flash('Debes indicar fecha y horas para el día extra.', 'error')
+            return redirect(url_for('dashboard'))
+
+        extra_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        hours = float(hours_str)
+
+        if hours <= 0:
+            flash('Las horas deben ser mayores que 0.', 'error')
+            return redirect(url_for('dashboard'))
+
+        today = now_local().date()
+        if extra_date < today:
+            flash('Solo puedes añadir días extra de hoy en adelante.', 'error')
+            return redirect(url_for('dashboard'))
+
+        existing = ExtraWorkDay.query.filter_by(user_id=current_user.id, date=extra_date).first()
+        if existing:
+            existing.hours_planned = hours
+            msg = 'Día extra actualizado correctamente.'
+        else:
+            extra = ExtraWorkDay(user_id=current_user.id, date=extra_date, hours_planned=hours)
+            db.session.add(extra)
+            msg = 'Día extra añadido correctamente.'
+
+        db.session.commit()
+        flash(msg, 'success')
+    except Exception as e:
+        db.session.rollback()
+        print('Error al añadir día extra:', e)
+        flash('Ha ocurrido un error al añadir el día extra.', 'error')
+
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/extra_day/delete/<int:id>')
+@login_required
+def delete_extra_day(id):
+    extra = ExtraWorkDay.query.get_or_404(id)
+
+    if extra.user_id != current_user.id and not current_user.is_admin:
+        flash('No tienes permisos para eliminar este día extra.', 'error')
+        return redirect(url_for('dashboard'))
+
+    try:
+        db.session.delete(extra)
+        db.session.commit()
+        flash('Día extra eliminado correctamente.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        print('Error al eliminar día extra:', e)
+        flash('Ha ocurrido un error al eliminar el día extra.', 'error')
+
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/clock_in', methods=['POST'])
