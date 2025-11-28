@@ -12,6 +12,14 @@
             <div class="card-body text-center">
                 <h5>{{ current_user.name }}, {{ now.strftime('%d/%m/%Y') }}</h5>
 
+                {% if estimated_end_date %}
+                <p class="mt-2">
+                    Según tu horario, <strong>terminarás las prácticas el {{ estimated_end_date.strftime('%d/%m/%Y')
+                        }}</strong>.
+                </p>
+                {% endif %}
+
+
                 {% if active_record %}
                 <div class="alert alert-warning mt-3">
                     <h6>Sesión activa desde:</h6>
@@ -65,46 +73,45 @@
                     <div class="table-responsive">
                         <table class="table table-sm">
                             <thead>
-                            <tr>
-                                <th>Inicio</th>
-                                <th>Fin</th>
-                                <th>Duración</th>
-                                <th>Ubicación</th>
-                            </tr>
+                                <tr>
+                                    <th>Inicio</th>
+                                    <th>Fin</th>
+                                    <th>Duración</th>
+                                    <th>Ubicación</th>
+                                </tr>
                             </thead>
                             <tbody>
-                            {% for record in today_records %}
-                            <tr class="{{ 'table-warning' if not record.exit_time }}">
-                                <!-- ✅ local time -->
-                                <td>{{ record.entry_time|localdt('%H:%M') }}</td>
-                                <td>
-                                    {% if record.exit_time %}
-                                    {{ record.exit_time|localdt('%H:%M') }}
-                                    {% else %}
-                                    <span class="badge bg-warning">En curso</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if record.exit_time %}
-                                    {{ (record.exit_time - record.entry_time).total_seconds() | hm_seconds }}
-                                    {% else %}
-                                    -
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if record.latitude and record.longitude %}
-                                    <button class="btn btn-sm btn-outline-primary view-map-btn"
-                                            data-lat="{{ record.latitude }}"
-                                            data-lng="{{ record.longitude }}"
+                                {% for record in today_records %}
+                                <tr class="{{ 'table-warning' if not record.exit_time }}">
+                                    <!-- ✅ local time -->
+                                    <td>{{ record.entry_time|localdt('%H:%M') }}</td>
+                                    <td>
+                                        {% if record.exit_time %}
+                                        {{ record.exit_time|localdt('%H:%M') }}
+                                        {% else %}
+                                        <span class="badge bg-warning">En curso</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if record.exit_time %}
+                                        {{ (record.exit_time - record.entry_time).total_seconds() | hm_seconds }}
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if record.latitude and record.longitude %}
+                                        <button class="btn btn-sm btn-outline-primary view-map-btn"
+                                            data-lat="{{ record.latitude }}" data-lng="{{ record.longitude }}"
                                             data-location="{{ record.location }}">
-                                        <i class="fas fa-map-marker-alt"></i> Ver mapa
-                                    </button>
-                                    {% else %}
-                                    <span title="{{ record.location }}">{{ record.location|truncate(20) }}</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
+                                            <i class="fas fa-map-marker-alt"></i> Ver mapa
+                                        </button>
+                                        {% else %}
+                                        <span title="{{ record.location }}">{{ record.location|truncate(20) }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
                             </tbody>
                         </table>
                     </div>
@@ -124,11 +131,9 @@
             {% if weekly_required_hours > 0 %}
             <div class="progress mt-2" style="height: 20px;">
                 <div class="progress-bar {% if weekly_hours >= weekly_required_hours %}bg-success{% elif weekly_hours >= weekly_required_hours * 0.8 %}bg-warning{% else %}bg-danger{% endif %}"
-                     role="progressbar"
-                     style="width: {{ (weekly_hours / weekly_required_hours * 100)|round if weekly_required_hours > 0 else 0 }}%"
-                     aria-valuenow="{{ weekly_hours }}"
-                     aria-valuemin="0"
-                     aria-valuemax="{{ weekly_required_hours }}">
+                    role="progressbar"
+                    style="width: {{ (weekly_hours / weekly_required_hours * 100)|round if weekly_required_hours > 0 else 0 }}%"
+                    aria-valuenow="{{ weekly_hours }}" aria-valuemin="0" aria-valuemax="{{ weekly_required_hours }}">
                     {{ "%.0f"|format(weekly_hours / weekly_required_hours * 100) if weekly_required_hours > 0 else 0 }}%
                 </div>
             </div>
@@ -144,18 +149,33 @@
             </h3>
             <div class="progress mt-2" style="height: 20px;">
                 <div class="progress-bar {% if total_hours_worked >= total_hours_required %}bg-success{% elif total_hours_worked >= total_hours_required * 0.8 %}bg-info{% else %}bg-primary{% endif %}"
-                     role="progressbar"
-                     style="width: {{ (total_hours_worked / total_hours_required * 100)|round if total_hours_required > 0 else 0 }}%"
-                     aria-valuenow="{{ total_hours_worked }}"
-                     aria-valuemin="0"
-                     aria-valuemax="{{ total_hours_required }}">
-                    {{ "%.0f"|format(total_hours_worked / total_hours_required * 100) if total_hours_required > 0 else 0 }}%
+                    role="progressbar"
+                    style="width: {{ (total_hours_worked / total_hours_required * 100)|round if total_hours_required > 0 else 0 }}%"
+                    aria-valuenow="{{ total_hours_worked }}" aria-valuemin="0"
+                    aria-valuemax="{{ total_hours_required }}">
+                    {{ "%.0f"|format(total_hours_worked / total_hours_required * 100) if total_hours_required > 0 else 0
+                    }}%
                 </div>
             </div>
-            <small class="text-muted mt-1 d-block">
-                Quedan: {{ ((total_hours_required - total_hours_worked) * 3600) | hm_seconds }}
-            </small>
-            <i class="fas fa-graduation-cap fa-2x text-info mt-2"></i>
+            {% if hours_remaining <= 0 %} <small class="text-success mt-1 d-block">
+                ¡Has completado todas las horas de prácticas! 🎉
+                </small>
+                {% else %}
+                <small class="text-muted mt-1 d-block">
+                    Quedan: {{ (hours_remaining * 3600) | hm_seconds }}
+                </small>
+                {% if estimated_end_date %}
+                <small class="text-muted d-block">
+                    Según tu horario, terminarías el <strong>{{ estimated_end_date.strftime('%d/%m/%Y') }}</strong>.
+                </small>
+                {% else %}
+                <small class="text-muted d-block">
+                    Configura tu horario para poder calcular la fecha de fin.
+                </small>
+                {% endif %}
+                {% endif %}
+
+                <i class="fas fa-graduation-cap fa-2x text-info mt-2"></i>
         </div>
 
         <div class="stat-card mt-3">
@@ -279,9 +299,9 @@
         }
     }
 
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.view-map-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
+            btn.addEventListener('click', function () {
                 const lat = parseFloat(this.getAttribute('data-lat'));
                 const lng = parseFloat(this.getAttribute('data-lng'));
                 const location = this.getAttribute('data-location');
@@ -291,16 +311,16 @@
         });
 
         if (!{{ (active_record is not none) | tojson }}) {
-            initMap(WORK_LAT, WORK_LNG, WORK_LOCATION);
-            setTimeout(() => { detectLocation(); }, 500);
-        }
+        initMap(WORK_LAT, WORK_LNG, WORK_LOCATION);
+        setTimeout(() => { detectLocation(); }, 500);
+    }
 
-        {% if active_record and active_record.latitude and active_record.longitude %}
-        setTimeout(() => { initActiveRecordMap({{ active_record.latitude }}, {{ active_record.longitude }}); }, 300);
-        {% endif %}
+    {% if active_record and active_record.latitude and active_record.longitude %}
+    setTimeout(() => { initActiveRecordMap({{ active_record.latitude }}, {{ active_record.longitude }}); }, 300);
+    {% endif %}
     });
 
-    document.getElementById('clockInForm')?.addEventListener('submit', async function(e) {
+    document.getElementById('clockInForm')?.addEventListener('submit', async function (e) {
         e.preventDefault();
         const btn = this.querySelector('button[type="submit"]');
         btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Detectando ubicación...';
@@ -310,10 +330,10 @@
             document.getElementById('latitudeIn').value = loc.lat;
             document.getElementById('longitudeIn').value = loc.lng;
             this.submit();
-        } catch(e) { this.submit(); }
+        } catch (e) { this.submit(); }
     });
 
-    document.getElementById('clockOutForm')?.addEventListener('submit', async function(e) {
+    document.getElementById('clockOutForm')?.addEventListener('submit', async function (e) {
         e.preventDefault();
         const btn = this.querySelector('button[type="submit"]');
         btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Detectando ubicación...';
@@ -323,7 +343,7 @@
             document.getElementById('latitudeOut').value = loc.lat;
             document.getElementById('longitudeOut').value = loc.lng;
             this.submit();
-        } catch(e) { this.submit(); }
+        } catch (e) { this.submit(); }
     });
 </script>
 {% endblock %}

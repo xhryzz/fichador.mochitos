@@ -628,6 +628,7 @@ def dashboard():
                    .all())
     total_hours_worked = sum((r.exit_time - r.entry_time).total_seconds() / 3600 for r in all_records)
 
+    # Horarios activos del usuario
     schedules = Schedule.query.filter_by(user_id=current_user.id, is_active=True).all()
     weekly_required_hours = 0
     for i in range(7):
@@ -639,14 +640,41 @@ def dashboard():
 
     total_hours_required = current_user.total_hours_required
 
-    return render_template('dashboard.html',
-                           active_record=active_record,
-                           today_records=today_records,
-                           weekly_hours=weekly_hours,
-                           today_hours=today_hours,
-                           weekly_required_hours=weekly_required_hours,
-                           total_hours_worked=total_hours_worked,
-                           total_hours_required=total_hours_required)
+    # ---- NUEVO: cálculo de horas restantes y fecha estimada de fin de prácticas ----
+    hours_remaining = max(total_hours_required - total_hours_worked, 0)
+    estimated_end_date = None
+
+    # Solo calculamos si quedan horas y el horario tiene horas a la semana
+    if hours_remaining > 0 and weekly_required_hours > 0 and schedules:
+        remaining = hours_remaining
+        day_cursor = today
+
+        # Recorremos día a día hasta consumir todas las horas (límite seguridad: 3 años)
+        for _ in range(365 * 3):
+            dow = day_cursor.weekday()
+            day_schedule = next((s for s in schedules if s.day_of_week == dow), None)
+            if day_schedule and (day_schedule.hours_required or 0) > 0:
+                remaining -= day_schedule.hours_required
+                if remaining <= 0:
+                    estimated_end_date = day_cursor
+                    break
+            day_cursor += timedelta(days=1)
+
+    return render_template(
+        'dashboard.html',
+        active_record=active_record,
+        today_records=today_records,
+        weekly_hours=weekly_hours,
+        today_hours=today_hours,
+        weekly_required_hours=weekly_required_hours,
+        total_hours_worked=total_hours_worked,
+        total_hours_required=total_hours_required,
+        hours_remaining=hours_remaining,
+        estimated_end_date=estimated_end_date
+    )
+
+
+
 @app.route('/clock_in', methods=['POST'])
 @login_required
 def clock_in():
